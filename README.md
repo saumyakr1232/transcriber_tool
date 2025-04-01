@@ -1,19 +1,10 @@
 # Audio Transcription Tool
-
-A Python application that transcribes text from MP4 or WAV files using offline methods.
-
-## Features
-
-- Transcribe audio from MP4 and WAV files
-- Works completely offline
-- Simple command-line interface
-- Outputs transcription to text files
-
 ## Requirements
 
 - Python 3.8+
 - FFmpeg (for MP4 processing)
 - Required Python packages (see requirements.txt)
+- CUDA-compatible GPU (optional, for faster Whisper transcription)
 
 ## Installation
 
@@ -24,23 +15,85 @@ A Python application that transcribes text from MP4 or WAV files using offline m
 pip install -r requirements.txt
 ```
 
-3. Download the Vosk model (for offline speech recognition):
+3. Set up a speech recognition model:
+
+   ### Option 1: Vosk (Default)
    - Visit https://alphacephei.com/vosk/models
    - Download a model appropriate for your language (e.g., vosk-model-small-en-us-0.15)
    - Extract the model to the `models` directory
+   - Or use the helper script: `python download_model.py --engine vosk`
+
+   ### Option 2: Whisper
+   - No manual download required - models are downloaded automatically on first use
+   - Configure which model to use in the application settings
+   - Or use the helper script: `python download_model.py --engine whisper --model-size base`
 
 ## Usage
 
-```bash
-python transcriber.py --input your_audio_file.mp4 --output transcription.txt
-```
+### GUI Application
 
-Or use the simplified interface:
+Run the application with:
 
 ```bash
 python app.py
+# or
+./run.sh
 ```
 
-## License
+You can specify which engine to use when running the application:
 
-MIT
+```bash
+# Run with Vosk engine
+./run.sh --engine vosk
+
+# Run with Whisper engine
+./run.sh --engine whisper
+```
+
+### Command Line Usage
+
+You can also use the transcriber directly from the command line:
+
+```bash
+# Using Vosk engine
+python transcriber.py --input your_audio_file.mp4 --output transcription.txt --engine vosk
+
+# Using Whisper engine
+python transcriber.py --input your_audio_file.mp4 --output transcription.txt --engine whisper
+```
+
+## Configuration
+
+The application uses a configuration file (`config.json`) to store settings. You can edit this file directly or use the Settings dialog in the application.
+
+### Available Configuration Options
+
+```json
+{
+    "engine": "vosk",           // Speech recognition engine: "vosk" or "whisper"
+    "models": {
+        "vosk": {
+            "model_path": "./models/vosk-model-small-en-us-0.15"  // Path to Vosk model
+        },
+        "whisper": {
+            "model_size": "base",  // Whisper model size: tiny, base, small, medium, large
+            "use_gpu": true,       // Use GPU for Whisper if available
+            "language": ""         // Language code (empty for auto-detection)
+        }
+    },
+    "transcription": {
+        "sample_rate": 16000,     // Audio sample rate
+        "word_timestamps": false   // Show word timestamps (Vosk only)
+    }
+}
+```
+
+## Engines Comparison
+
+### Vosk
+- Pros: Faster, lower resource usage, works entirely offline
+- Cons: Less accurate for some languages, requires downloading models manually
+
+### Whisper
+- Pros: More accurate, supports many languages, better handling of accents and background noise
+- Cons: Slower (especially without GPU), higher resource usage, downloads models on first use

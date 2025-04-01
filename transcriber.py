@@ -16,46 +16,115 @@ try:
     from vosk import Model, KaldiRecognizer
     from pydub import AudioSegment
     import ffmpeg
+    # Import config module
+    from config import get_config
 except ImportError as e:
     print(f"Error: Required module not found: {e}")
     print("Please install the required dependencies using: pip install -r requirements.txt")
     sys.exit(1)
 
+# Try to import whisper if available
+try:
+    import whisper
+    WHISPER_AVAILABLE = True
+except ImportError:
+    WHISPER_AVAILABLE = False
+    print("Warning: Whisper not available. Install with 'pip install openai-whisper' to use Whisper engine.")
+
 class AudioTranscriber:
     """Class for transcribing audio from MP4 or WAV files using offline methods."""
     
     def __init__(self, model_path: str = None):
-        """Initialize the transcriber with a Vosk model.
+        """Initialize the transcriber with a model.
         
         Args:
-            model_path: Path to the Vosk model directory. If None, will look in ./models/
+            model_path: Path to the model directory. If None, will use the configured model.
+        """
+        # Load configuration
+        self.config = get_config()
+        self.engine = self.config.get_engine()
+        
+        # Initialize the appropriate engine
+        if self.engine == "vosk":
+            self._init_vosk(model_path)
+        elif self.engine == "whisper":
+            if not WHISPER_AVAILABLE:
+                print("Error: Whisper engine selected but not available.")
+                print("Please install Whisper with: pip install openai-whisper")
+                sys.exit(1)
+            self._init_whisper(model_path)
+        else:
+            print(f"Error: Unknown engine '{self.engine}'")
+            print("Supported engines: 'vosk', 'whisper'")
+            sys.exit(1)
+    
+    def _init_vosk(self, model_path: str = None):
+        """Initialize the Vosk engine.
+        
+        Args:
+            model_path: Path to the Vosk model directory. If None, will use the configured model.
         """
         # Try to find a model if not specified
         if model_path is None:
-            # Look in the models directory
-            models_dir = Path("./models")
-            if models_dir.exists():
-                model_dirs = [d for d in models_dir.iterdir() if d.is_dir() and d.name.startswith("vosk-model")]
-                if model_dirs:
-                    model_path = str(model_dirs[0])
-                    print(f"Using model: {model_path}")
+            model_path = self.config.get("models.vosk.model_path")
+            
+            # If still None, look in the models directory
+            if model_path is None:
+                models_dir = Path("./models")
+                if models_dir.exists():
+                    model_dirs = [d for d in models_dir.iterdir() if d.is_dir() and d.name.startswith("vosk-model")]
+                    if model_dirs:
+                        model_path = str(model_dirs[0])
+                        print(f"Using model: {model_path}")
+                    else:
+                        print("No Vosk model found in ./models/ directory.")
+                        print("Please download a model from https://alphacephei.com/vosk/models")
+                        print("and extract it to the ./models/ directory.")
+                        sys.exit(1)
                 else:
-                    print("No Vosk model found in ./models/ directory.")
-                    print("Please download a model from https://alphacephei.com/vosk/models")
-                    print("and extract it to the ./models/ directory.")
+                    print("Models directory not found.")
+                    print("Please create a ./models/ directory and download a Vosk model")
+                    print("from https://alphacephei.com/vosk/models")
                     sys.exit(1)
-            else:
-                print("Models directory not found.")
-                print("Please create a ./models/ directory and download a Vosk model")
-                print("from https://alphacephei.com/vosk/models")
-                sys.exit(1)
         
         # Load the model
         try:
             self.model = Model(model_path)
-            print("Model loaded successfully.")
+            print("Vosk model loaded successfully.")
         except Exception as e:
-            print(f"Error loading model: {e}")
+            print(f"Error loading Vosk model: {e}")
+            sys.exit(1)
+    
+    def _init_whisper(self, model_path: str = None):
+        """Initialize the Whisper engine.
+        
+        Args:
+            model_path: Path to the Whisper model or model size. If None, will use the configured model.
+        """
+        # Get model size from config if not specified
+        if model_path is None:
+            model_size = self.config.get("models.whisper.model_size", "base")
+        else:
+            model_size = model_path
+        
+        # Check if model size is valid
+        valid_sizes = ["tiny", "base", "small", "medium", "large"]
+        if model_size not in valid_sizes:
+            print(f"Error: Invalid Whisper model size '{model_size}'")
+            print(f"Valid sizes: {', '.join(valid_sizes)}")
+            sys.exit(1)
+        
+        # Get device preference
+        use_gpu = self.config.get("models.whisper.use_gpu", True)
+        device = "cuda" if use_gpu and whisper.available_devices() else "cpu"
+        
+        # Load the model
+        try:
+            print(f"Loading Whisper model '{model_size}' on {device}...")
+            self.model = whisper.load_model(model_size, device=device)
+            print("Whisper model loaded successfully.")
+        except Exception as e:
+            print(f"Error loading Whisper model: {e}")
             sys.exit(1)
     
     def extract_audio_from_mp4(self, mp4_path: str, output_wav_path: Optional[str] = None) -> str:
@@ -90,7 +159,7 @@ class AudioTranscriber:
                 os.remove(output_wav_path)
             sys.exit(1)
     
-    def transcribe_wav(self, wav_path: str) -> str:
+    def transcribe_wav_vosk(self, wav_path: str) -> str:
         """Transcribe a WAV file using Vosk.
         
         Args:
@@ -149,7 +218,54 @@ class AudioTranscriber:
             return text.strip()
         
         except Exception as e:
-            print(f"Error transcribing audio: {e}")
+            print(f"Error transcribing audio with Vosk: {e}")
+            return ""
+    
+    def transcribe_wav_whisper(self, wav_path: str) -> str:
+        """Transcribe a WAV file using Whisper.
+        
+        Args:
+            wav_path: Path to the WAV file
+            
+        Returns:
+            Transcribed text
+        """
+        try:
+            # Get language preference from config
+            language = self.config.get("models.whisper.language", None)
+            if language == "":
+                language = None
+            
+            # Transcribe the audio
+            print("Transcribing with Whisper...")
+            result = self.model.transcribe(
+                wav_path,
+                language=language,
+                verbose=False
+            )
+            
+            # Return the transcribed text
+            return result["text"].strip()
+        
+        except Exception as e:
+            print(f"Error transcribing audio with Whisper: {e}")
+            return ""
+    
+    def transcribe_wav(self, wav_path: str) -> str:
+        """Transcribe a WAV file using the configured engine.
+        
+        Args:
+            wav_path: Path to the WAV file
+            
+        Returns:
+            Transcribed text
+        """
+        if self.engine == "vosk":
+            return self.transcribe_wav_vosk(wav_path)
+        elif self.engine == "whisper":
+            return self.transcribe_wav_whisper(wav_path)
+        else:
+            print(f"Error: Unknown engine '{self.engine}'")
             return ""
     
     def transcribe_file(self, input_path: str) -> str:
@@ -192,9 +308,15 @@ def main():
     parser = argparse.ArgumentParser(description="Transcribe audio from MP4 or WAV files.")
     parser.add_argument("--input", "-i", required=True, help="Path to the input audio file (MP4 or WAV)")
     parser.add_argument("--output", "-o", help="Path to the output text file")
-    parser.add_argument("--model", "-m", help="Path to the Vosk model directory")
+    parser.add_argument("--model", "-m", help="Path to the model directory or model size")
+    parser.add_argument("--engine", "-e", choices=["vosk", "whisper"], help="Speech recognition engine to use")
     
     args = parser.parse_args()
+    
+    # Override engine in config if specified
+    if args.engine:
+        config = get_config()
+        config.set("engine", args.engine)
     
     # Initialize the transcriber
     transcriber = AudioTranscriber(model_path=args.model)
