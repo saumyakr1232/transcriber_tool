@@ -41,7 +41,7 @@ class AudioTranscriber:
             self.transcriber = TranscriberFactory.create_transcriber(self.config.config, model_path)
             print(f"Using {self.engine} engine for transcription.")
         except Exception as e:
-            print(f"Error initializing transcriber: {e}")
+            print(f"Error initializing transcriber here : {e}")
             sys.exit(1)
     
     def transcribe_file(self, input_path: str) -> str:

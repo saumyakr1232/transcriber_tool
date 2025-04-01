@@ -15,6 +15,7 @@ except ImportError as e:
 # Try to import whisper if available
 try:
     import whisper
+    import torch  # Add this import
     WHISPER_AVAILABLE = True
 except ImportError:
     WHISPER_AVAILABLE = False
@@ -63,12 +64,14 @@ class WhisperTranscriber(BaseTranscriber):
         
         # Get device preference
         use_gpu = self.config.get("models.whisper.use_gpu", True)
-        device = "cuda" if use_gpu and whisper.available_devices() else "cpu"
+        device = "cuda" if use_gpu and torch.cuda.is_available() else "cpu"
         
         # Load the model
         try:
             print(f"Loading Whisper model '{model_size}' on {device}...")
             self.model = whisper.load_model(model_size, device=device)
+            # Set fp16 only if using GPU
+            self.model.fp16 = device == "cuda"
             self.model_size = model_size
             print("Whisper model loaded successfully.")
         except Exception as e:

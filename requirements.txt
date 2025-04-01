@@ -12,5 +12,4 @@ torch>=1.9.0
 openai-whisper>=20230314  # Whisper model for offline use
 
 # UI dependencies
-tkinter  # Should be included with Python
 pillow>=9.0.0  # For image processing in the UI
