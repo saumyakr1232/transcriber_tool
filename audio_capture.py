@@ -74,30 +74,50 @@ class AudioCapture:
             print("Warning: Could not find microphone input device. Microphone capture may not work.")
     
     def _find_system_output_device(self) -> Optional[Dict]:
-        """Find the default system output device.
+        """Find the system output device for recording.
+        
+        On macOS, this requires a virtual audio device like BlackHole or Soundflower
+        to be installed and configured as the audio output.
         
         Returns:
-            Dictionary with device info of the default system output device, or None if not found
+            Dictionary with device info of the system output device, or None if not found
         """
+        # Look for virtual audio devices first (BlackHole, Soundflower, etc.)
+        virtual_device_keywords = ['blackhole', 'soundflower', 'loopback', 'virtual']
+        
+        for device in self.devices:
+            # Check if this is a virtual audio device by name
+            device_name = device['name'].lower()
+            is_virtual = any(keyword in device_name for keyword in virtual_device_keywords)
+            
+            # Virtual devices should have input channels to capture system audio
+            if is_virtual and device['max_input_channels'] > 0:
+                print(f"Found virtual audio device: {device['name']}")
+                return {
+                    'index': device['index'],
+                    'channels': min(2, device['max_input_channels'])
+                }
+        
+        # If no virtual device found, try to use the default output device
+        # (this won't work on macOS without additional software)
         try:
-            # Try to get the default output device
             device_info = sd.query_devices(kind='output')
-            return {
-                'index': device_info['index'],
-                'channels': min(2, device_info['max_output_channels'])
-            }
+            print("Warning: No virtual audio device found. System audio capture may not work.")
+            print("On macOS, you need to install BlackHole or Soundflower to capture system audio.")
+            print("See README_audio_capture.md for instructions.")
+            
+            # Check if the device has input channels (unlikely for regular output devices)
+            if device_info['max_input_channels'] > 0:
+                return {
+                    'index': device_info['index'],
+                    'channels': min(2, device_info['max_input_channels'])
+                }
+            else:
+                print(f"Output device {device_info['name']} has no input channels and cannot be used for recording.")
+                return None
+                
         except Exception as e:
             print(f"Error finding system output device: {e}")
-            
-            # Try to find any output device
-            for device in self.devices:
-                if device['max_output_channels'] > 0:
-                    print(f"Using alternative output device: {device['name']}")
-                    return {
-                        'index': device['index'],
-                        'channels': min(2, device['max_output_channels'])
-                    }
-            
             return None
     
     def _find_mic_input_device(self) -> Optional[Dict]:
@@ -128,28 +148,58 @@ class AudioCapture:
             return None
     
     def _record_system_audio(self):
-        """Record audio from the system output device."""
-        with sd.InputStream(device=self.system_output_device['index'],
-                           samplerate=self.sample_rate,
-                           channels=self.system_output_device['channels'],
-                           dtype=self.dtype) as stream:
-            while self.is_recording:
-                data, overflowed = stream.read(self.sample_rate)
-                if overflowed:
-                    print("System audio buffer overflowed")
-                self.system_audio_data.append(data.copy())
+        """Record audio from the system output device.
+        
+        On macOS, this requires a virtual audio device like BlackHole or Soundflower
+        to be installed and configured as the audio output.
+        """
+        try:
+            # Calculate buffer size based on sample rate to ensure accurate timing
+            # Using 0.05 seconds of audio per buffer for better timing accuracy
+            # Smaller buffer size helps prevent timing issues
+            buffer_size = int(self.sample_rate * 0.05)  # 0.05 second buffer
+            
+            # Use blocksize parameter to ensure consistent timing
+            with sd.InputStream(device=self.system_output_device['index'],
+                            samplerate=self.sample_rate,
+                            channels=self.system_output_device['channels'],
+                            blocksize=buffer_size,
+                            dtype=self.dtype) as stream:
+                while self.is_recording:
+                    data, overflowed = stream.read(buffer_size)
+                    if overflowed:
+                        print("System audio buffer overflowed")
+                    self.system_audio_data.append(data.copy())
+                    # Small sleep to prevent CPU overuse and ensure timing accuracy
+                    time.sleep(0.001)
+        except Exception as e:
+            print(f"Error recording system audio: {e}")
+            print("On macOS, you need to install a virtual audio device like BlackHole or Soundflower")
+            print("and configure your system to route audio through it.")
+            print("See README_audio_capture.md for instructions.")
+            # Set empty data so the recording can continue with just microphone
+            self.system_audio_data = []
     
     def _record_mic_audio(self):
         """Record audio from the microphone input device."""
+        # Calculate buffer size based on sample rate to ensure accurate timing
+        # Using 0.05 seconds of audio per buffer for better timing accuracy
+        # Smaller buffer size helps prevent timing issues
+        buffer_size = int(self.sample_rate * 0.05)  # 0.05 second buffer
+        
+        # Use blocksize parameter to ensure consistent timing
         with sd.InputStream(device=self.mic_input_device['index'],
                            samplerate=self.sample_rate,
                            channels=self.mic_input_device['channels'],
+                           blocksize=buffer_size,
                            dtype=self.dtype) as stream:
             while self.is_recording:
-                data, overflowed = stream.read(self.sample_rate)
+                data, overflowed = stream.read(buffer_size)
                 if overflowed:
                     print("Microphone audio buffer overflowed")
                 self.mic_audio_data.append(data.copy())
+                # Small sleep to prevent CPU overuse and ensure timing accuracy
+                time.sleep(0.001)
     
     def start_recording(self):
         """Start recording audio from both system output and microphone."""
@@ -200,8 +250,19 @@ class AudioCapture:
         system_audio = np.vstack(self.system_audio_data) if self.system_audio_data else np.array([])
         mic_audio = np.vstack(self.mic_audio_data) if self.mic_audio_data else np.array([])
         
-        print(f"Captured {len(system_audio) / self.sample_rate:.2f}s of system audio")
-        print(f"Captured {len(mic_audio) / self.sample_rate:.2f}s of microphone audio")
+        # Calculate and print actual durations
+        system_duration = len(system_audio) / self.sample_rate if len(system_audio) > 0 else 0
+        mic_duration = len(mic_audio) / self.sample_rate if len(mic_audio) > 0 else 0
+        
+        print(f"Captured {system_duration:.2f}s of system audio ({len(self.system_audio_data)} buffers)")
+        print(f"Captured {mic_duration:.2f}s of microphone audio ({len(self.mic_audio_data)} buffers)")
+        
+        # Debug information about sample rate and buffer sizes
+        print(f"Sample rate: {self.sample_rate} Hz")
+        if self.system_audio_data and len(self.system_audio_data) > 0:
+            print(f"Average system buffer size: {len(system_audio) / len(self.system_audio_data):.1f} frames")
+        if self.mic_audio_data and len(self.mic_audio_data) > 0:
+            print(f"Average mic buffer size: {len(mic_audio) / len(self.mic_audio_data):.1f} frames")
         
         return system_audio, mic_audio
     
@@ -223,7 +284,7 @@ class AudioCapture:
         with wave.open(file_path, 'wb') as wf:
             wf.setnchannels(self.channels)
             wf.setsampwidth(2)  # 2 bytes for int16
-            wf.setframerate(self.sample_rate)
+            wf.setframerate(self.sample_rate * 0.5)
             wf.writeframes(audio_data.tobytes())
         
         print(f"Audio saved to {file_path}")
@@ -266,10 +327,10 @@ class AudioCapture:
             padding = np.zeros((max_length - len(mic_audio), output_channels), dtype=mic_audio.dtype)
             mic_audio = np.vstack([mic_audio, padding])
         
-        # Mix the audio (simple average)
+        # Mix the audio (equal weights for system and mic audio)
         # You can adjust the mixing ratio if needed
-        system_weight = 0.7  # 70% system audio
-        mic_weight = 0.3     # 30% microphone audio
+        system_weight = 0.5  # 50% system audio
+        mic_weight = 0.5     # 50% microphone audio
         merged_audio = (system_audio * system_weight) + (mic_audio * mic_weight)
         
         return merged_audio
@@ -330,10 +391,24 @@ def main():
     
     try:
         print(f"Recording for {args.duration} seconds...")
+        # Record start time for precise duration calculation
+        start_time = time.time()
         audio_capture.start_recording()
         
-        # Wait for specified duration
-        time.sleep(args.duration)
+        # Wait for specified duration with more precise timing
+        # Use a loop with small sleeps to ensure accurate duration
+        elapsed = 0
+        while elapsed < args.duration:
+            # Sleep in small increments to allow for more precise timing
+            time.sleep(0.05)
+            elapsed = time.time() - start_time
+            # Optionally print progress (uncomment if needed)
+            # if int(elapsed) != int(elapsed - 0.05) and elapsed < args.duration:
+            #     print(f"Recording: {elapsed:.1f}s / {args.duration:.1f}s")
+        
+        # Calculate actual recording duration
+        actual_duration = time.time() - start_time
+        print(f"Actual recording duration: {actual_duration:.2f}s")
         
         # Stop recording and save
         audio_capture.stop_recording()
