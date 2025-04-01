@@ -1,0 +1,15 @@
+# Core dependencies
+numpy>=1.20.0
+vosk>=0.3.42  # Offline speech recognition
+pydub>=0.25.1  # Audio processing
+ffmpeg-python>=0.2.0  # For handling MP4 files
+
+# Optional: for better performance with Vosk
+torch>=1.9.0
+
+# Alternative offline speech recognition
+openai-whisper>=20230314  # Whisper model for offline use
+
+# UI dependencies
+tkinter  # Should be included with Python
+pillow>=9.0.0  # For image processing in the UI
