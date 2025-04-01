@@ -12,6 +12,7 @@ import time
 try:
     from transcriber import AudioTranscriber
     from config import get_config, Config
+    from transcribers import TranscriberFactory
 except ImportError as e:
     print(f"Error: Could not import required modules: {e}")
     print("Make sure transcriber.py and config.py are in the same directory as this script.")
@@ -129,6 +130,49 @@ class TranscriberApp:
         ttk.Button(button_frame, text="Settings", command=self.open_settings).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Exit", command=self.root.destroy).pack(side=tk.RIGHT, padx=5)
     
+    def create_menu(self):
+        """Create the menu bar."""
+        menubar = tk.Menu(self.root)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Open Audio File", command=self.browse_file)
+        file_menu.add_command(label="Save Transcription", command=self.save_transcription)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.destroy)
+        menubar.add_cascade(label="File", menu=file_menu)
+        
+        # Engine menu
+        engine_menu = tk.Menu(menubar, tearoff=0)
+        
+        # Create variables for radio buttons
+        self.engine_var = tk.StringVar(value=self.config.get_engine())
+        
+        # Get available engines from factory
+        available_engines = TranscriberFactory.get_available_engines()
+        
+        for engine in available_engines:
+            engine_menu.add_radiobutton(
+                label=engine.capitalize(), 
+                variable=self.engine_var, 
+                value=engine,
+                command=self.change_engine
+            )
+        
+        menubar.add_cascade(label="Engine", menu=engine_menu)
+        
+        # Settings menu
+        settings_menu = tk.Menu(menubar, tearoff=0)
+        settings_menu.add_command(label="Preferences", command=self.open_settings)
+        menubar.add_cascade(label="Settings", menu=settings_menu)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="About", command=self.show_about)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        
+        self.root.config(menu=menubar)
+    
     def browse_file(self):
         """Open a file dialog to select an audio file."""
         filetypes = [
@@ -198,238 +242,191 @@ class TranscriberApp:
     
     def _progress_simulator(self):
         """Simulate progress updates."""
-        for i in range(1, 100):
-            time.sleep(0.1)  # Adjust based on expected transcription time
-            self.progress_var.set(i)
-            # Stop if we're done
+        for i in range(1, 101):
+            # Check if transcription is still running
             if self.status_var.get() != "Transcribing...":
                 break
+            
+            # Update progress
+            self.root.after(0, lambda val=i: self.progress_var.set(val))
+            
+            # Sleep for a short time
+            time.sleep(0.1)
     
     def _update_transcription(self, text):
         """Update the transcription text area with the result."""
-        self.transcription_text.delete(1.0, tk.END)
-        self.transcription_text.insert(tk.END, text)
+        # Update status
         self.status_var.set("Transcription complete")
         self.progress_var.set(100)
         
-        # Save automatically if output path is specified
-        if self.output_path.get():
-            self.save_transcription()
+        # Update text area
+        if text:
+            self.transcription_text.delete(1.0, tk.END)
+            self.transcription_text.insert(tk.END, text)
+        else:
+            self._show_error("Transcription failed.")
     
     def _show_error(self, message):
         """Show an error message."""
-        messagebox.showerror("Error", message)
         self.status_var.set("Error")
-        self.progress_var.set(0)
+        messagebox.showerror("Error", message)
     
     def save_transcription(self):
         """Save the transcription to a file."""
         # Get the transcription text
         text = self.transcription_text.get(1.0, tk.END).strip()
         if not text:
-            messagebox.showinfo("Info", "No transcription to save.")
+            messagebox.showerror("Error", "No transcription to save.")
             return
         
-        # Get the output path
+        # Get the output file path
         output_path = self.output_path.get()
         if not output_path:
-            # Ask for a file path
-            output_path = filedialog.asksaveasfilename(
-                filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
-                defaultextension=".txt"
-            )
+            # Open a file dialog
+            self.browse_output()
+            output_path = self.output_path.get()
             if not output_path:
                 return
-            self.output_path.set(output_path)
         
-        # Save the file
+        # Save the transcription
         try:
             with open(output_path, "w") as f:
                 f.write(text)
             messagebox.showinfo("Success", f"Transcription saved to {output_path}")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save file: {e}")
-    
-    def create_menu(self):
-        """Create the application menu."""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-        
-        # File menu
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Open Audio File", command=self.browse_file)
-        file_menu.add_command(label="Save Transcription", command=self.save_transcription)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.root.destroy)
-        
-        # Settings menu
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Settings", menu=settings_menu)
-        settings_menu.add_command(label="Configure Transcription", command=self.open_settings)
-        
-        # Help menu
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="About", command=self.show_about)
-    
-    def open_settings(self):
-        """Open the settings dialog."""
-        SettingsDialog(self.root, self.config, self.reload_transcriber)
-    
-    def reload_transcriber(self):
-        """Reload the transcriber with updated configuration."""
-        try:
-            self.transcriber = AudioTranscriber()
-            self.status_var.set(f"Using {self.config.get_engine().capitalize()} engine")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to initialize transcriber: {e}")
-    
-    def show_about(self):
-        """Show the about dialog."""
-        messagebox.showinfo(
-            "About Audio Transcriber",
-            "Audio Transcription Tool\n\n"
-            "A tool for transcribing audio files using offline speech recognition.\n\n"
-            "Supports both Vosk and Whisper engines for transcription."
-        )
+            messagebox.showerror("Error", f"Failed to save transcription: {e}")
     
     def clear_all(self):
-        """Clear all fields and reset the UI."""
+        """Clear all input and output fields."""
         self.file_path.set("")
         self.output_path.set("")
         self.transcription_text.delete(1.0, tk.END)
         self.status_var.set("Ready")
         self.progress_var.set(0)
-
-
-class SettingsDialog:
-    """Dialog for configuring transcription settings."""
     
-    def __init__(self, parent, config, callback=None):
-        """Initialize the settings dialog.
+    def change_engine(self):
+        """Change the transcription engine."""
+        # Get the selected engine
+        engine = self.engine_var.get()
         
-        Args:
-            parent: The parent window
-            config: The configuration object
-            callback: Function to call when settings are saved
-        """
-        self.parent = parent
-        self.config = config
-        self.callback = callback
-        
-        # Create the dialog window
-        self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Transcription Settings")
-        self.dialog.geometry("500x400")
-        self.dialog.minsize(400, 300)
-        self.dialog.transient(parent)  # Set to be on top of the parent window
-        self.dialog.grab_set()  # Modal dialog
-        
-        # Create the UI
-        self.create_ui()
-    
-    def create_ui(self):
-        """Create the settings dialog UI."""
-        # Create a notebook (tabbed interface)
-        notebook = ttk.Notebook(self.dialog)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # General settings tab
-        general_frame = ttk.Frame(notebook, padding=10)
-        notebook.add(general_frame, text="General")
-        
-        # Engine selection
-        ttk.Label(general_frame, text="Speech Recognition Engine:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        
-        self.engine_var = tk.StringVar(value=self.config.get("engine", "vosk"))
-        engine_frame = ttk.Frame(general_frame)
-        engine_frame.grid(row=0, column=1, sticky=tk.W, pady=5)
-        
-        ttk.Radiobutton(engine_frame, text="Vosk", variable=self.engine_var, value="vosk").pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(engine_frame, text="Whisper", variable=self.engine_var, value="whisper").pack(side=tk.LEFT, padx=5)
-        
-        # Vosk settings tab
-        vosk_frame = ttk.Frame(notebook, padding=10)
-        notebook.add(vosk_frame, text="Vosk Settings")
-        
-        ttk.Label(vosk_frame, text="Model Path:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        
-        self.vosk_model_path = tk.StringVar(value=self.config.get("models.vosk.model_path", ""))
-        path_frame = ttk.Frame(vosk_frame)
-        path_frame.grid(row=0, column=1, sticky=tk.W, pady=5)
-        
-        ttk.Entry(path_frame, textvariable=self.vosk_model_path, width=30).pack(side=tk.LEFT, padx=5)
-        ttk.Button(path_frame, text="Browse", command=self.browse_vosk_model).pack(side=tk.LEFT, padx=5)
-        
-        # Help text
-        ttk.Label(vosk_frame, text="Download Vosk models from: https://alphacephei.com/vosk/models").grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=10)
-        
-        # Whisper settings tab
-        whisper_frame = ttk.Frame(notebook, padding=10)
-        notebook.add(whisper_frame, text="Whisper Settings")
-        
-        # Model size
-        ttk.Label(whisper_frame, text="Model Size:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        
-        self.whisper_model_size = tk.StringVar(value=self.config.get("models.whisper.model_size", "base"))
-        sizes = [("Tiny (fastest, least accurate)", "tiny"), 
-                 ("Base", "base"), 
-                 ("Small", "small"), 
-                 ("Medium", "medium"), 
-                 ("Large (slowest, most accurate)", "large")]
-        
-        size_frame = ttk.Frame(whisper_frame)
-        size_frame.grid(row=0, column=1, sticky=tk.W, pady=5)
-        
-        for i, (text, value) in enumerate(sizes):
-            ttk.Radiobutton(size_frame, text=text, variable=self.whisper_model_size, value=value).grid(row=i, column=0, sticky=tk.W)
-        
-        # Use GPU
-        self.use_gpu = tk.BooleanVar(value=self.config.get("models.whisper.use_gpu", True))
-        ttk.Checkbutton(whisper_frame, text="Use GPU if available", variable=self.use_gpu).grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=5)
-        
-        # Language
-        ttk.Label(whisper_frame, text="Language (leave empty for auto-detection):").grid(row=2, column=0, sticky=tk.W, pady=5)
-        
-        self.whisper_language = tk.StringVar(value=self.config.get("models.whisper.language", ""))
-        ttk.Entry(whisper_frame, textvariable=self.whisper_language, width=10).grid(row=2, column=1, sticky=tk.W, pady=5)
-        
-        # Buttons
-        button_frame = ttk.Frame(self.dialog)
-        button_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Button(button_frame, text="Save", command=self.save_settings).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(button_frame, text="Cancel", command=self.dialog.destroy).pack(side=tk.RIGHT, padx=5)
-    
-    def browse_vosk_model(self):
-        """Open a directory dialog to select a Vosk model directory."""
-        directory = filedialog.askdirectory(title="Select Vosk Model Directory")
-        if directory:
-            self.vosk_model_path.set(directory)
-    
-    def save_settings(self):
-        """Save the settings to the configuration."""
-        # Save engine selection
-        self.config.set("engine", self.engine_var.get())
-        
-        # Save Vosk settings
-        self.config.set("models.vosk.model_path", self.vosk_model_path.get())
-        
-        # Save Whisper settings
-        self.config.set("models.whisper.model_size", self.whisper_model_size.get())
-        self.config.set("models.whisper.use_gpu", self.use_gpu.get())
-        self.config.set("models.whisper.language", self.whisper_language.get())
-        
-        # Save configuration to file
+        # Update the configuration
+        self.config.set("engine", engine)
         self.config.save()
         
-        # Call the callback function if provided
-        if self.callback:
-            self.callback()
+        # Reinitialize the transcriber
+        try:
+            self.transcriber = AudioTranscriber()
+            messagebox.showinfo("Engine Changed", f"Transcription engine changed to {engine.capitalize()}.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize transcriber: {e}")
+    
+    def open_settings(self):
+        """Open the settings dialog."""
+        # Create a new top-level window
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Settings")
+        settings_window.geometry("500x400")
+        settings_window.minsize(400, 300)
+        settings_window.transient(self.root)
+        settings_window.grab_set()
+        
+        # Create a notebook for tabs
+        notebook = ttk.Notebook(settings_window)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Create tabs for different settings
+        general_tab = ttk.Frame(notebook, padding=10)
+        vosk_tab = ttk.Frame(notebook, padding=10)
+        whisper_tab = ttk.Frame(notebook, padding=10)
+        
+        notebook.add(general_tab, text="General")
+        notebook.add(vosk_tab, text="Vosk")
+        notebook.add(whisper_tab, text="Whisper")
+        
+        # General settings
+        ttk.Label(general_tab, text="Engine:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        engine_var = tk.StringVar(value=self.config.get_engine())
+        engine_combo = ttk.Combobox(general_tab, textvariable=engine_var, state="readonly")
+        engine_combo["values"] = TranscriberFactory.get_available_engines()
+        engine_combo.grid(row=0, column=1, sticky=tk.W, pady=5)
+        
+        # Vosk settings
+        ttk.Label(vosk_tab, text="Model Path:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        vosk_model_path = tk.StringVar(value=self.config.get("models.vosk.model_path", ""))
+        ttk.Entry(vosk_tab, textvariable=vosk_model_path, width=40).grid(row=0, column=1, sticky=tk.W, pady=5)
+        ttk.Button(vosk_tab, text="Browse", command=lambda: self._browse_model_dir(vosk_model_path)).grid(row=0, column=2, padx=5)
+        
+        # Whisper settings
+        ttk.Label(whisper_tab, text="Model Size:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        whisper_model_size = tk.StringVar(value=self.config.get("models.whisper.model_size", "base"))
+        size_combo = ttk.Combobox(whisper_tab, textvariable=whisper_model_size, state="readonly")
+        size_combo["values"] = ["tiny", "base", "small", "medium", "large"]
+        size_combo.grid(row=0, column=1, sticky=tk.W, pady=5)
+        
+        ttk.Label(whisper_tab, text="Use GPU:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        use_gpu = tk.BooleanVar(value=self.config.get("models.whisper.use_gpu", True))
+        ttk.Checkbutton(whisper_tab, variable=use_gpu).grid(row=1, column=1, sticky=tk.W, pady=5)
+        
+        ttk.Label(whisper_tab, text="Language:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        language = tk.StringVar(value=self.config.get("models.whisper.language", ""))
+        ttk.Entry(whisper_tab, textvariable=language, width=10).grid(row=2, column=1, sticky=tk.W, pady=5)
+        ttk.Label(whisper_tab, text="(Leave empty for auto-detection)").grid(row=2, column=2, sticky=tk.W, pady=5)
+        
+        # Buttons
+        button_frame = ttk.Frame(settings_window)
+        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Button(button_frame, text="Save", command=lambda: self._save_settings(
+            engine_var.get(),
+            vosk_model_path.get(),
+            whisper_model_size.get(),
+            use_gpu.get(),
+            language.get(),
+            settings_window
+        )).pack(side=tk.RIGHT, padx=5)
+        
+        ttk.Button(button_frame, text="Cancel", command=settings_window.destroy).pack(side=tk.RIGHT, padx=5)
+    
+    def _browse_model_dir(self, path_var):
+        """Open a directory dialog to select a model directory."""
+        directory = filedialog.askdirectory()
+        if directory:
+            path_var.set(directory)
+    
+    def _save_settings(self, engine, vosk_model_path, whisper_model_size, use_gpu, language, window):
+        """Save the settings and close the dialog."""
+        # Update the configuration
+        self.config.set("engine", engine)
+        self.config.set("models.vosk.model_path", vosk_model_path)
+        self.config.set("models.whisper.model_size", whisper_model_size)
+        self.config.set("models.whisper.use_gpu", use_gpu)
+        self.config.set("models.whisper.language", language)
+        
+        # Save the configuration
+        self.config.save()
+        
+        # Update the engine variable in the menu
+        self.engine_var.set(engine)
+        
+        # Reinitialize the transcriber
+        try:
+            self.transcriber = AudioTranscriber()
+            messagebox.showinfo("Settings Saved", "Settings saved successfully.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize transcriber: {e}")
         
         # Close the dialog
-        self.dialog.destroy()
+        window.destroy()
+    
+    def show_about(self):
+        """Show the about dialog."""
+        messagebox.showinfo(
+            "About Audio Transcriber",
+            "Audio Transcriber\n\n"
+            "A tool for transcribing audio from MP4 or WAV files\n"
+            "using offline speech recognition engines.\n\n"
+            "Supported engines: Vosk, Whisper"
+        )
 
 
 def main():
