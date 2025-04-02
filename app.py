@@ -8,12 +8,13 @@ from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 import time
 import tempfile
+import queue
 
 # Import our modules
 try:
     from config import get_config, Config
     from transcribers import TranscriberFactory
-    from live_audio_capture import AudioRecorder  # Changed from LiveAudioCapture
+    from audio_recorder1 import AudioRecorder2  # Using AudioRecorder2 for dual audio capture
     from audio_visualizer import DualAudioVisualizer
     from live_transcriber import LiveTranscriber
     import numpy as np
@@ -39,24 +40,33 @@ class TranscriberApp:
         # Load configuration
         self.config = get_config()
 
+        self.transcriber = None
+        self.mic_transcriber = None
+        self.system_transcriber = None
+
         # Set up the transcriber
         self.setup_transcriber()
         
+        # Live audio capture and transcription
+        self.live_audio_capture = AudioRecorder2()
+        
+        # Initialize queues for transcription
+        self.mic_queue = queue.Queue()
+        self.system_queue = queue.Queue()
+
         # Create the UI
         self.create_ui()
-        
-        # Live audio capture and transcription
-        self.live_audio_capture = None
-        self.live_transcriber = None
         self.is_recording = False
         self.is_transcribing = False
         
-        # Update interval for visualization (ms)
-        self.update_interval = 50
-        
+        # Create separate transcribers for mic and system audio
+        self.mic_queue = queue.Queue()
+        self.system_queue = queue.Queue()
+
+
         # Bind window close event
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-    
+
     def setup_transcriber(self):
         """Set up the transcriber with a model."""
         # Check if models directory exists
@@ -84,6 +94,19 @@ class TranscriberApp:
         # Try to initialize the transcriber
         try:
             self.transcriber = TranscriberFactory.create_transcriber(self.config.config)
+
+            # Initialize transcribers
+            self.mic_transcriber = LiveTranscriber(
+                config=self.config.config,
+                transcription_callback=self.handle_mic_transcription,
+                transcriber=self.transcriber
+            )
+            
+            self.system_transcriber = LiveTranscriber(
+                config=self.config.config,
+                transcription_callback=self.handle_system_transcription,
+                transcriber=self.transcriber
+            )
             
             # Show loading dialog
             loading_dialog = tk.Toplevel(self.root)
@@ -233,6 +256,31 @@ class TranscriberApp:
     
     def create_live_tab(self):
         """Create the UI for the live transcription tab."""
+        # Device selection frame
+        device_frame = ttk.LabelFrame(self.live_tab, text="Audio Device Selection", padding="10")
+        device_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Microphone selection
+        ttk.Label(device_frame, text="Microphone:").grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
+        self.mic_var = tk.StringVar()
+        self.mic_dropdown = ttk.Combobox(device_frame, textvariable=self.mic_var, state="readonly")
+        self.mic_dropdown['values'] = [str(mic) for mic in self.live_audio_capture.get_available_mics()]
+        if self.mic_dropdown['values']:
+            self.mic_dropdown.current(0)
+        self.mic_dropdown.grid(row=0, column=1, sticky=tk.EW)
+        
+        # System audio selection
+        ttk.Label(device_frame, text="System Audio:").grid(row=1, column=0, padx=(0, 5), sticky=tk.W)
+        self.system_var = tk.StringVar()
+        self.system_dropdown = ttk.Combobox(device_frame, textvariable=self.system_var, state="readonly")
+        self.system_dropdown['values'] = [str(dev) for dev in self.live_audio_capture.get_available_system_devices()]
+        if self.system_dropdown['values']:
+            self.system_dropdown.current(0)
+        self.system_dropdown.grid(row=1, column=1, sticky=tk.EW)
+        
+        # Configure grid weights
+        device_frame.columnconfigure(1, weight=1)
+        
         # Live transcription section
         live_transcription_frame = ttk.LabelFrame(self.live_tab, text="Live Transcription", padding="10")
         live_transcription_frame.pack(fill=tk.BOTH, expand=True, pady=10)
@@ -240,6 +288,10 @@ class TranscriberApp:
         # Add text widget for live transcription
         self.live_transcription_text = tk.Text(live_transcription_frame, wrap=tk.WORD, height=10)
         self.live_transcription_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        
+        # Configure text colors
+        self.live_transcription_text.tag_configure("blue", foreground="blue")
+        self.live_transcription_text.tag_configure("green", foreground="green")
         
         # Add scrollbar for live transcription
         live_scrollbar = ttk.Scrollbar(live_transcription_frame, command=self.live_transcription_text.yview)
@@ -264,6 +316,9 @@ class TranscriberApp:
         # Output file for live transcription
         self.live_output_path = tk.StringVar()
         self.live_output_path.set("live_transcription.txt")
+        
+        # Start queue processing
+        self.process_transcription_queue()
     
     def browse_file(self):
         """Open a file dialog to select an audio file."""
@@ -324,7 +379,7 @@ class TranscriberApp:
             # Update the UI with the result
             self.root.after(0, lambda: self._update_transcription(text))
         except Exception as e:
-            self.root.after(0, lambda: self._show_error(f"Transcription failed: {e}"))
+            self._show_error(f"Transcription failed: {e}")
     
     def _update_progress_thread(self):
         """Update the progress bar periodically."""
@@ -427,6 +482,7 @@ class TranscriberApp:
     
     def clear_live(self):
         """Clear the live transcription text."""
+        print("Clearing live transcription...")
         self.live_transcription_text.delete(1.0, tk.END)
         self.live_status_var.set("Ready")
     
@@ -445,25 +501,20 @@ class TranscriberApp:
             self.start_button.config(text="Stop Recording", state="disabled")
             self.root.update()
             
-            # Initialize live audio capture if not already done
-            if self.live_audio_capture is None:
-                # Create live audio capture instance
-                self.live_audio_capture = AudioRecorder()
+            # Set selected devices
+            selected_mic = next((mic for mic in self.live_audio_capture.get_available_mics() if str(mic) == self.mic_var.get()), None)
+            selected_system = next((dev for dev in self.live_audio_capture.get_available_system_devices() if str(dev) == self.system_var.get()), None)
             
-            # Initialize live transcriber if not already done
-            if self.live_transcriber is None:
-                # Create live transcriber instance using factory
-                self.live_transcriber = LiveTranscriber(
-                    config=self.config.config,
-                    transcription_callback=self._update_live_transcription
-                )
+            self.live_audio_capture.set_mic_device(selected_mic)
+            self.live_audio_capture.set_system_device(selected_system)
             
             # Start recording
             self.live_audio_capture.start_recording()
             self.is_recording = True
             
-            # Start transcription
-            self.live_transcriber.start_transcription()
+            # Start both transcribers
+            self.mic_transcriber.start_transcription()
+            self.system_transcriber.start_transcription()
             self.is_transcribing = True
             
             # Start processing in a separate thread
@@ -483,28 +534,26 @@ class TranscriberApp:
     
     def stop_recording(self):
         """Stop recording and transcribing audio."""
+        if not self.is_recording:
+            return
+            
         try:
-            # Stop transcription
-            if self.live_transcriber and self.is_transcribing:
-                self.live_transcriber.stop_transcription()
-                self.is_transcribing = False
+            # Stop audio capture
+            self.live_audio_capture.stop_recording()
             
-            # Stop recording
-            if self.live_audio_capture and self.is_recording:
-                self.live_audio_capture.stop_recording()
-                self.is_recording = False
-            
-            # Clean up resources
-            self._cleanup_resources()
+            # Stop transcription if transcribers are initialized
+            if hasattr(self, 'mic_transcriber'):
+                self.mic_transcriber.stop_transcription()
+            if hasattr(self, 'system_transcriber'):
+                self.system_transcriber.stop_transcription()
             
             # Update UI
+            self.is_recording = False
             self.live_status_var.set("Ready")
             self.start_button.config(text="Start Recording", state="normal")
-        
         except Exception as e:
-            self.live_status_var.set("Error")
             messagebox.showerror("Error", f"Failed to stop recording: {e}")
-            self.start_button.config(text="Start Recording", state="normal")
+            self.start_button.config(state="normal")
     
     def _cleanup_resources(self):
         """Clean up resources and release memory."""
@@ -526,24 +575,56 @@ class TranscriberApp:
         self.processing_thread = None
     
     def _process_audio(self):
-        """Process audio from the recorder and send to transcriber"""
-        while self.is_recording or not self.live_audio_capture.mic_queue.empty():
-            frames = self.live_audio_capture.get_mic_audio()
-            if frames is not None and len(frames) > 0:
-                self.live_transcriber.add_audio_data(frames)
+        """Process audio from both channels and send to respective transcribers"""
+        while self.is_recording or not (self.live_audio_capture.mic_queue.empty() and self.live_audio_capture.system_queue.empty()):
+            # Process microphone audio
+            mic_frames = self.live_audio_capture.get_mic_audio()
+            if mic_frames is not None and len(mic_frames) > 0:
+                self.mic_transcriber.add_audio_data(mic_frames)
+            
+            # Process system audio
+            system_frames = self.live_audio_capture.get_system_audio()
+            if system_frames is not None and len(system_frames) > 0:
+                self.system_transcriber.add_audio_data(system_frames)
+            
             time.sleep(0.1)
     
-    def _update_live_transcription(self, text):
-        """Update the live transcription text area with the result."""
-        if not text:
-            return
+    def handle_mic_transcription(self, text):
+        """Callback function for microphone transcription results"""
+        if text:
+            self.mic_queue.put((text, "blue"))
+    
+    def handle_system_transcription(self, text):
+        """Callback function for system audio transcription results"""
+        if text:
+            self.system_queue.put((text, "green"))
+    
+    def process_transcription_queue(self):
+        """Process transcriptions from both microphone and system audio queues."""
+        # Process microphone transcriptions
+        if not self.mic_queue.empty():
+            transcription, color = self.mic_queue.get()
             
-        self.live_transcription_text.config(state=tk.NORMAL)
-        if self.live_transcription_text.index('end-1c') != '1.0':
-            self.live_transcription_text.insert(tk.END, " ")
-        self.live_transcription_text.insert(tk.END, text)
-        self.live_transcription_text.see(tk.END)
-        self.live_transcription_text.config(state=tk.DISABLED)
+            self.live_transcription_text.config(state=tk.NORMAL)
+            if self.live_transcription_text.index('end-1c') != '1.0':
+                self.live_transcription_text.insert(tk.END, " ")
+            self.live_transcription_text.insert(tk.END, transcription, color)
+            self.live_transcription_text.see(tk.END)
+            self.live_transcription_text.config(state=tk.DISABLED)
+        
+        # Process system transcriptions
+        if not self.system_queue.empty():
+            transcription, color = self.system_queue.get()
+            
+            self.live_transcription_text.config(state=tk.NORMAL)
+            if self.live_transcription_text.index('end-1c') != '1.0':
+                self.live_transcription_text.insert(tk.END, " ")
+            self.live_transcription_text.insert(tk.END, transcription, color)
+            self.live_transcription_text.see(tk.END)
+            self.live_transcription_text.config(state=tk.DISABLED)
+        
+        # Schedule the next check
+        self.root.after(100, self.process_transcription_queue)
     
     def change_engine(self):
         """Change the transcription engine."""
@@ -556,31 +637,8 @@ class TranscriberApp:
         
         # Reinitialize the transcriber
         try:
-            self.transcriber = AudioTranscriber()
-            
-            # Also reinitialize the live transcriber if it exists
-            if self.live_transcriber:
-                # Stop transcription if running
-                if self.is_transcribing:
-                    self.live_transcriber.stop_transcription()
-                    self.is_transcribing = False
-                
-                # Create a new live transcriber
-                def transcription_callback(text):
-                    if text:
-                        # Update the UI with the result
-                        self.root.after(0, lambda: self._update_live_transcription(text))
-                
-                self.live_transcriber = LiveTranscriber(
-                    config=self.config.config,
-                    transcription_callback=transcription_callback
-                )
-                
-                # Restart transcription if recording
-                if self.is_recording:
-                    self.live_transcriber.start_transcription()
-                    self.is_transcribing = True
-            
+            self.stop_recording()
+            self.setup_transcriber()
             messagebox.showinfo("Engine Changed", f"Transcription engine changed to {engine.capitalize()}.")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to initialize transcriber: {e}")

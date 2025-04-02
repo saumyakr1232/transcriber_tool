@@ -29,6 +29,7 @@ class LiveTranscriber:
     
     def __init__(self, config: Optional[Dict[str, Any]] = None,
                  transcription_callback: Optional[Callable[[str], None]] = None,
+                 transcriber: Optional[BaseTranscriber] = None,
                  model_path: str = None):
         """Initialize the live transcriber.
         
@@ -43,7 +44,10 @@ class LiveTranscriber:
         
         # Set up the transcriber
         try:
-            self.transcriber = TranscriberFactory.create_transcriber(self.config, model_path)
+            if not transcriber:
+                self.transcriber = TranscriberFactory.create_transcriber(self.config, model_path)
+            else:
+                self.transcriber = transcriber
             self.engine = self.config.get("engine", "vosk")
             print(f"Using {self.engine} engine for live transcription.")
         except Exception as e:

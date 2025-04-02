@@ -6,7 +6,7 @@ import time
 import os
 
 # Import our custom modules
-from live_audio_capture import AudioRecorder
+from audio_recorder1 import AudioRecorder2
 from live_transcriber import LiveTranscriber
 from config import get_config
 
@@ -20,7 +20,11 @@ class LiveTranscriptionApp:
         self.config = get_config().config
         
         # Initialize our modules
-        self.recorder = AudioRecorder()
+        self.recorder = AudioRecorder2()
+        
+        # Get available devices
+        self.available_mics = self.recorder.get_available_mics()
+        self.available_system_devices = self.recorder.get_available_system_devices()
         
         # Create separate transcribers for mic and system audio
         self.mic_queue = queue.Queue()
@@ -77,6 +81,31 @@ class LiveTranscriptionApp:
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
+        # Device selection frame
+        device_frame = ttk.LabelFrame(main_frame, text="Audio Device Selection", padding="10")
+        device_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Microphone selection
+        ttk.Label(device_frame, text="Microphone:").grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
+        self.mic_var = tk.StringVar()
+        self.mic_dropdown = ttk.Combobox(device_frame, textvariable=self.mic_var, state="readonly")
+        self.mic_dropdown['values'] = [str(mic) for mic in self.available_mics]
+        if self.available_mics:
+            self.mic_dropdown.current(0)
+        self.mic_dropdown.grid(row=0, column=1, sticky=tk.EW)
+        
+        # System audio selection
+        ttk.Label(device_frame, text="System Audio:").grid(row=1, column=0, padx=(0, 5), sticky=tk.W)
+        self.system_var = tk.StringVar()
+        self.system_dropdown = ttk.Combobox(device_frame, textvariable=self.system_var, state="readonly")
+        self.system_dropdown['values'] = [str(dev) for dev in self.available_system_devices]
+        if self.available_system_devices:
+            self.system_dropdown.current(0)
+        self.system_dropdown.grid(row=1, column=1, sticky=tk.EW)
+        
+        # Configure grid weights
+        device_frame.columnconfigure(1, weight=1)
+        
         # Status label
         self.status_label = ttk.Label(main_frame, text="Status: Ready")
         self.status_label.pack(pady=5, anchor=tk.W)
@@ -111,6 +140,13 @@ class LiveTranscriptionApp:
         # Configure text colors
         self.transcription_text.tag_configure("blue", foreground="blue")
         self.transcription_text.tag_configure("green", foreground="green")
+        
+        # Set selected devices
+        selected_mic = next((mic for mic in self.available_mics if str(mic) == self.mic_var.get()), None)
+        selected_system = next((dev for dev in self.available_system_devices if str(dev) == self.system_var.get()), None)
+        
+        self.recorder.set_mic_device(selected_mic)
+        self.recorder.set_system_device(selected_system)
         
         # Start recording
         self.recorder.start_recording()
