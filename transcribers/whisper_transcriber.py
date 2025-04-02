@@ -89,12 +89,12 @@ class WhisperTranscriber(BaseTranscriber):
         """
         try:
             # Get language preference from config
-            language = self.config.get("models.whisper.language", None)
+            language = self.config["models"]["whisper"]["language"]
             if language == "":
                 language = None
             
             # Transcribe the audio
-            print("Transcribing with Whisper...")
+            print("Transcribing with Whisper... Language: ", language)
             result = self.model.transcribe(
                 wav_path,
                 language=language,

@@ -24,8 +24,8 @@ DEFAULT_CONFIG = {
             "model_size": "base",
             # Use GPU for Whisper if available
             "use_gpu": True,
-            # Language code (leave empty for auto-detection)
-            "language": "",
+            # Language code (set to 'en' for English)
+            "language": "en",
         }
     },
     
@@ -156,10 +156,10 @@ class Config:
 
 
 # Create a global configuration instance
-config = Config()
+config: Config = Config()
 
 
-def get_config():
+def get_config() -> Config:
     """Get the global configuration instance.
     
     Returns:
@@ -171,6 +171,7 @@ def get_config():
 if __name__ == "__main__":
     # If run directly, print the current configuration
     import pprint
-    cfg = get_config()
+    cfg:Config = get_config()
     print("Current configuration:")
     pprint.pprint(cfg.config)
+    print(cfg.get("models.whisper.language"))

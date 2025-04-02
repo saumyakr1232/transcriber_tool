@@ -7,7 +7,7 @@
         "whisper": {
             "model_size": "base",
             "use_gpu": true,
-            "language": ""
+            "language": "English"
         }
     },
     "transcription": {
