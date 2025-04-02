@@ -43,7 +43,7 @@ class WhisperTranscriber(BaseTranscriber):
             
         self.model = None
         self.model_size = None
-        self.load_model()
+        self.fp16 = False
     
     def load_model(self, model_size: str = None):
         """Load the Whisper model.
@@ -88,15 +88,39 @@ class WhisperTranscriber(BaseTranscriber):
             Transcribed text
         """
         try:
+            # Convert path to pathlib.Path for cross-platform compatibility
+            from pathlib import Path
+            import os
+            
+            # Normalize the path for Windows compatibility
+            wav_path = os.path.abspath(os.path.normpath(wav_path))
+            wav_file = Path(wav_path)
+            
+            if not wav_file.exists():
+                print(f"Error: WAV file not found at {wav_path}")
+                return ""
+            
+            # Convert to absolute path and resolve any symlinks
+            try:
+                wav_file = wav_file.resolve(strict=True)
+            except (RuntimeError, OSError) as e:
+                print(f"Error: Unable to resolve WAV file path - {e}")
+                return ""
+            
+            # Additional Windows-specific path check
+            if os.name == 'nt' and len(str(wav_file)) > 260:
+                print("Error: File path exceeds Windows path length limit")
+                return ""
+            
             # Get language preference from config
             language = self.config["models"]["whisper"]["language"]
             if language == "":
                 language = None
             
-            # Transcribe the audio
+            # Transcribe the audio using the resolved path as string
             print("Transcribing with Whisper... Language: ", language)
             result = self.model.transcribe(
-                wav_path,
+                str(wav_file),
                 language=language,
                 verbose=False,
                 fp16=self.fp16
@@ -105,6 +129,12 @@ class WhisperTranscriber(BaseTranscriber):
             # Return the transcribed text
             return result["text"].strip()
         
+        except FileNotFoundError as e:
+            print(f"Error: Could not access WAV file - {e}")
+            return ""
+        except PermissionError as e:
+            print(f"Error: Permission denied accessing WAV file - {e}")
+            return ""
         except Exception as e:
             print(f"Error transcribing audio with Whisper: {e}")
             return ""

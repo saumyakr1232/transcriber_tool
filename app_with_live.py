@@ -26,6 +26,29 @@ class LiveTranscriptionApp:
         self.mic_queue = queue.Queue()
         self.system_queue = queue.Queue()
         
+        # Show loading dialog
+        loading_dialog = tk.Toplevel(self.root)
+        loading_dialog.title("Loading Models")
+        loading_dialog.geometry("300x150")
+        loading_dialog.transient(self.root)
+        loading_dialog.grab_set()
+        
+        # Center the dialog
+        loading_dialog.geometry("+%d+%d" % (
+            self.root.winfo_x() + self.root.winfo_width()/2 - 150,
+            self.root.winfo_y() + self.root.winfo_height()/2 - 75
+        ))
+        
+        # Add loading message and progress bar
+        ttk.Label(loading_dialog, text="Loading transcription models...", padding=10).pack()
+        progress = ttk.Progressbar(loading_dialog, mode='indeterminate')
+        progress.pack(padx=20, pady=10, fill=tk.X)
+        progress.start()
+        
+        # Update the dialog
+        loading_dialog.update()
+        
+        # Initialize transcribers
         self.mic_transcriber = LiveTranscriber(
             config=self.config,
             transcription_callback=self.handle_mic_transcription
@@ -35,6 +58,13 @@ class LiveTranscriptionApp:
             config=self.config,
             transcription_callback=self.handle_system_transcription
         )
+        
+        # Load models
+        self.mic_transcriber.load_model()
+        self.system_transcriber.load_model()
+        
+        # Close the dialog
+        loading_dialog.destroy()
         
         # Set up the UI
         self.setup_ui()

@@ -84,6 +84,35 @@ class TranscriberApp:
         # Try to initialize the transcriber
         try:
             self.transcriber = TranscriberFactory.create_transcriber(self.config.config)
+            
+            # Show loading dialog
+            loading_dialog = tk.Toplevel(self.root)
+            loading_dialog.title("Loading Model")
+            loading_dialog.geometry("300x150")
+            loading_dialog.transient(self.root)
+            loading_dialog.grab_set()
+            
+            # Center the dialog
+            loading_dialog.geometry("+%d+%d" % (
+                self.root.winfo_x() + self.root.winfo_width()/2 - 150,
+                self.root.winfo_y() + self.root.winfo_height()/2 - 75
+            ))
+            
+            # Add loading message and progress bar
+            ttk.Label(loading_dialog, text="Loading transcription model...", padding=10).pack()
+            progress = ttk.Progressbar(loading_dialog, mode='indeterminate')
+            progress.pack(padx=20, pady=10, fill=tk.X)
+            progress.start()
+            
+            # Update the dialog
+            loading_dialog.update()
+            
+            # Load the model
+            self.transcriber.load_model()
+            
+            # Close the dialog
+            loading_dialog.destroy()
+            
         except Exception as e:
             messagebox.showerror("Error", f"Failed to initialize transcriber: {e}")
             self.root.destroy()

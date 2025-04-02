@@ -187,3 +187,13 @@ class LiveTranscriber:
         if not self.transcription_queue.empty():
             return self.transcription_queue.get()
         return None
+    
+    def load_model(self):
+        """Load the transcription model.
+        
+        This method ensures the transcription model is properly initialized
+        before use. It's called during application startup.
+        """
+        # The model is already loaded in the constructor
+        # This method exists for compatibility with the application's initialization flow
+        self.transcriber.load_model()

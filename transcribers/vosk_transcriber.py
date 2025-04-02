@@ -34,7 +34,6 @@ class VoskTranscriber(BaseTranscriber):
         super().__init__(config)
         self.model = None
         self.model_path = None
-        self.load_model()
     
     def load_model(self, model_path: str = None):
         """Load the Vosk model.
