@@ -498,8 +498,8 @@ class TranscriberApp:
     
     def _process_audio(self):
         """Process audio from the recorder and send to transcriber"""
-        while self.is_recording or not self.live_audio_capture.audio_queue.empty():
-            frames = self.live_audio_capture.get_audio()
+        while self.is_recording or not self.live_audio_capture.mic_queue.empty():
+            frames = self.live_audio_capture.get_mic_audio()
             if frames is not None and len(frames) > 0:
                 self.live_transcriber.add_audio_data(frames)
             time.sleep(0.1)
