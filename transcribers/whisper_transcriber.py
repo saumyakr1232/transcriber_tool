@@ -71,7 +71,7 @@ class WhisperTranscriber(BaseTranscriber):
             print(f"Loading Whisper model '{model_size}' on {device}...")
             self.model = whisper.load_model(model_size, device=device)
             # Set fp16 only if using GPU
-            self.model.fp16 = device == "cuda"
+            self.fp16 = device == "cuda"
             self.model_size = model_size
             print("Whisper model loaded successfully.")
         except Exception as e:
@@ -98,7 +98,8 @@ class WhisperTranscriber(BaseTranscriber):
             result = self.model.transcribe(
                 wav_path,
                 language=language,
-                verbose=False
+                verbose=False,
+                fp16=self.fp16
             )
             
             # Return the transcribed text

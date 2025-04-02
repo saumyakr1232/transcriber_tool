@@ -7,19 +7,23 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 import time
+import tempfile
 
 # Import our modules
 try:
-    from transcriber import AudioTranscriber
     from config import get_config, Config
     from transcribers import TranscriberFactory
+    from live_audio_capture import AudioRecorder  # Changed from LiveAudioCapture
+    from audio_visualizer import DualAudioVisualizer
+    from live_transcriber import LiveTranscriber
+    import numpy as np
 except ImportError as e:
     print(f"Error: Could not import required modules: {e}")
-    print("Make sure transcriber.py and config.py are in the same directory as this script.")
+    print("Make sure all required modules are in the same directory as this script.")
     sys.exit(1)
 
 class TranscriberApp:
-    """GUI application for the audio transcriber."""
+    """GUI application for the audio transcriber with file and live transcription support."""
     
     def __init__(self, root):
         """Initialize the application.
@@ -34,12 +38,24 @@ class TranscriberApp:
         
         # Load configuration
         self.config = get_config()
-        
+
         # Set up the transcriber
         self.setup_transcriber()
         
         # Create the UI
         self.create_ui()
+        
+        # Live audio capture and transcription
+        self.live_audio_capture = None
+        self.live_transcriber = None
+        self.is_recording = False
+        self.is_transcribing = False
+        
+        # Update interval for visualization (ms)
+        self.update_interval = 50
+        
+        # Bind window close event
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
     
     def setup_transcriber(self):
         """Set up the transcriber with a model."""
@@ -67,7 +83,7 @@ class TranscriberApp:
         
         # Try to initialize the transcriber
         try:
-            self.transcriber = AudioTranscriber()
+            self.transcriber = TranscriberFactory.create_transcriber(self.config.config)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to initialize transcriber: {e}")
             self.root.destroy()
@@ -77,58 +93,22 @@ class TranscriberApp:
         # Create menu bar
         self.create_menu()
         
-        # Create a main frame
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Create a notebook for tabs
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # File selection section
-        file_frame = ttk.LabelFrame(main_frame, text="Select Audio File", padding="10")
-        file_frame.pack(fill=tk.X, pady=10)
+        # Create tabs
+        self.file_tab = ttk.Frame(self.notebook, padding="10")
+        self.live_tab = ttk.Frame(self.notebook, padding="10")
         
-        self.file_path = tk.StringVar()
-        ttk.Entry(file_frame, textvariable=self.file_path, width=50).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        ttk.Button(file_frame, text="Browse", command=self.browse_file).pack(side=tk.RIGHT, padx=5)
+        self.notebook.add(self.file_tab, text="File Transcription")
+        self.notebook.add(self.live_tab, text="Live Transcription")
         
-        # Output file section
-        output_frame = ttk.LabelFrame(main_frame, text="Output File (Optional)", padding="10")
-        output_frame.pack(fill=tk.X, pady=10)
+        # Create UI for file transcription tab
+        self.create_file_tab()
         
-        self.output_path = tk.StringVar()
-        ttk.Entry(output_frame, textvariable=self.output_path, width=50).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        ttk.Button(output_frame, text="Browse", command=self.browse_output).pack(side=tk.RIGHT, padx=5)
-        
-        # Transcription section
-        transcription_frame = ttk.LabelFrame(main_frame, text="Transcription", padding="10")
-        transcription_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-        
-        # Transcription text area
-        self.transcription_text = tk.Text(transcription_frame, wrap=tk.WORD, height=10)
-        self.transcription_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
-        
-        # Scrollbar for text area
-        scrollbar = ttk.Scrollbar(transcription_frame, command=self.transcription_text.yview)
-        scrollbar.pack(fill=tk.Y, side=tk.RIGHT)
-        self.transcription_text.config(yscrollcommand=scrollbar.set)
-        
-        # Progress bar
-        self.progress_var = tk.DoubleVar()
-        self.progress = ttk.Progressbar(main_frame, variable=self.progress_var, maximum=100)
-        self.progress.pack(fill=tk.X, pady=10)
-        
-        # Status label
-        self.status_var = tk.StringVar(value="Ready")
-        status_label = ttk.Label(main_frame, textvariable=self.status_var)
-        status_label.pack(anchor=tk.W, pady=5)
-        
-        # Buttons
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill=tk.X, pady=10)
-        
-        ttk.Button(button_frame, text="Transcribe", command=self.start_transcription).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Save", command=self.save_transcription).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Clear", command=self.clear_all).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Settings", command=self.open_settings).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Exit", command=self.root.destroy).pack(side=tk.RIGHT, padx=5)
+        # Create UI for live transcription tab
+        self.create_live_tab()
     
     def create_menu(self):
         """Create the menu bar."""
@@ -139,7 +119,7 @@ class TranscriberApp:
         file_menu.add_command(label="Open Audio File", command=self.browse_file)
         file_menu.add_command(label="Save Transcription", command=self.save_transcription)
         file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.root.destroy)
+        file_menu.add_command(label="Exit", command=self.on_close)
         menubar.add_cascade(label="File", menu=file_menu)
         
         # Engine menu
@@ -172,6 +152,89 @@ class TranscriberApp:
         menubar.add_cascade(label="Help", menu=help_menu)
         
         self.root.config(menu=menubar)
+    
+    def create_file_tab(self):
+        """Create the UI for the file transcription tab."""
+        # File selection section
+        file_frame = ttk.LabelFrame(self.file_tab, text="Select Audio File", padding="10")
+        file_frame.pack(fill=tk.X, pady=10)
+        
+        self.file_path = tk.StringVar()
+        ttk.Entry(file_frame, textvariable=self.file_path, width=50).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        ttk.Button(file_frame, text="Browse", command=self.browse_file).pack(side=tk.RIGHT, padx=5)
+        
+        # Output file section
+        output_frame = ttk.LabelFrame(self.file_tab, text="Output File (Optional)", padding="10")
+        output_frame.pack(fill=tk.X, pady=10)
+        
+        self.output_path = tk.StringVar()
+        ttk.Entry(output_frame, textvariable=self.output_path, width=50).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        ttk.Button(output_frame, text="Browse", command=self.browse_output).pack(side=tk.RIGHT, padx=5)
+        
+        # Transcription section
+        transcription_frame = ttk.LabelFrame(self.file_tab, text="Transcription", padding="10")
+        transcription_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # Transcription text area
+        self.transcription_text = tk.Text(transcription_frame, wrap=tk.WORD, height=10)
+        self.transcription_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        
+        # Scrollbar for text area
+        scrollbar = ttk.Scrollbar(transcription_frame, command=self.transcription_text.yview)
+        scrollbar.pack(fill=tk.Y, side=tk.RIGHT)
+        self.transcription_text.config(yscrollcommand=scrollbar.set)
+        
+        # Progress bar
+        self.progress_var = tk.DoubleVar()
+        self.progress = ttk.Progressbar(self.file_tab, variable=self.progress_var, maximum=100)
+        self.progress.pack(fill=tk.X, pady=10)
+        
+        # Status label
+        self.status_var = tk.StringVar(value="Ready")
+        status_label = ttk.Label(self.file_tab, textvariable=self.status_var)
+        status_label.pack(anchor=tk.W, pady=5)
+        
+        # Buttons
+        button_frame = ttk.Frame(self.file_tab)
+        button_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Button(button_frame, text="Transcribe", command=self.start_transcription).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Save", command=self.save_transcription).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Clear", command=self.clear_all).pack(side=tk.LEFT, padx=5)
+    
+    def create_live_tab(self):
+        """Create the UI for the live transcription tab."""
+        # Live transcription section
+        live_transcription_frame = ttk.LabelFrame(self.live_tab, text="Live Transcription", padding="10")
+        live_transcription_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # Add text widget for live transcription
+        self.live_transcription_text = tk.Text(live_transcription_frame, wrap=tk.WORD, height=10)
+        self.live_transcription_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        
+        # Add scrollbar for live transcription
+        live_scrollbar = ttk.Scrollbar(live_transcription_frame, command=self.live_transcription_text.yview)
+        live_scrollbar.pack(fill=tk.Y, side=tk.RIGHT)
+        self.live_transcription_text.config(yscrollcommand=live_scrollbar.set)
+        
+        # Status label
+        self.live_status_var = tk.StringVar(value="Ready")
+        live_status_label = ttk.Label(self.live_tab, textvariable=self.live_status_var)
+        live_status_label.pack(anchor=tk.W, pady=5)
+        
+        # Buttons
+        live_button_frame = ttk.Frame(self.live_tab)
+        live_button_frame.pack(fill=tk.X, pady=10)
+        
+        self.start_button = ttk.Button(live_button_frame, text="Start Recording", command=self.toggle_recording)
+        self.start_button.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(live_button_frame, text="Save Transcription", command=self.save_live_transcription).pack(side=tk.LEFT, padx=5)
+        ttk.Button(live_button_frame, text="Clear", command=self.clear_live).pack(side=tk.LEFT, padx=5)
+        
+        # Output file for live transcription
+        self.live_output_path = tk.StringVar()
+        self.live_output_path.set("live_transcription.txt")
     
     def browse_file(self):
         """Open a file dialog to select an audio file."""
@@ -296,13 +359,162 @@ class TranscriberApp:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save transcription: {e}")
     
+    def save_live_transcription(self):
+        """Save the live transcription to a file."""
+        # Get the transcription text
+        text = self.live_transcription_text.get(1.0, tk.END).strip()
+        if not text:
+            messagebox.showerror("Error", "No transcription to save.")
+            return
+        
+        # Get the output file path
+        output_path = self.live_output_path.get()
+        if not output_path:
+            # Open a file dialog
+            filetypes = [
+                ("Text Files", "*.txt"),
+                ("All Files", "*.*")
+            ]
+            output_path = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=".txt")
+            if not output_path:
+                return
+            self.live_output_path.set(output_path)
+        
+        # Save the transcription
+        try:
+            with open(output_path, "w") as f:
+                f.write(text)
+            messagebox.showinfo("Success", f"Transcription saved to {output_path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save transcription: {e}")
+    
     def clear_all(self):
-        """Clear all input and output fields."""
+        """Clear all input and output fields in the file tab."""
         self.file_path.set("")
         self.output_path.set("")
         self.transcription_text.delete(1.0, tk.END)
         self.status_var.set("Ready")
         self.progress_var.set(0)
+    
+    def clear_live(self):
+        """Clear the live transcription text."""
+        self.live_transcription_text.delete(1.0, tk.END)
+        self.live_status_var.set("Ready")
+    
+    def toggle_recording(self):
+        """Toggle recording and transcription on/off."""
+        if not self.is_recording:
+            self.start_recording()
+        else:
+            self.stop_recording()
+    
+    def start_recording(self):
+        """Start recording and transcribing audio."""
+        try:
+            # Update UI
+            self.live_status_var.set("Initializing...")
+            self.start_button.config(text="Stop Recording", state="disabled")
+            self.root.update()
+            
+            # Initialize live audio capture if not already done
+            if self.live_audio_capture is None:
+                # Create live audio capture instance
+                self.live_audio_capture = AudioRecorder()
+            
+            # Initialize live transcriber if not already done
+            if self.live_transcriber is None:
+                # Create live transcriber instance using factory
+                self.live_transcriber = LiveTranscriber(
+                    config=self.config.config,
+                    transcription_callback=self._update_live_transcription
+                )
+            
+            # Start recording
+            self.live_audio_capture.start_recording()
+            self.is_recording = True
+            
+            # Start transcription
+            self.live_transcriber.start_transcription()
+            self.is_transcribing = True
+            
+            # Start processing in a separate thread
+            self.processing_thread = threading.Thread(target=self._process_audio, daemon=True)
+            self.processing_thread.start()
+            
+            # Update UI
+            self.live_status_var.set("Recording and transcribing...")
+            self.start_button.config(text="Stop Recording", state="normal")
+        
+        except Exception as e:
+            self.live_status_var.set("Error")
+            messagebox.showerror("Error", f"Failed to start recording: {e}")
+            self.start_button.config(text="Start Recording", state="normal")
+            # Clean up resources on error
+            self._cleanup_resources()
+    
+    def stop_recording(self):
+        """Stop recording and transcribing audio."""
+        try:
+            # Stop transcription
+            if self.live_transcriber and self.is_transcribing:
+                self.live_transcriber.stop_transcription()
+                self.is_transcribing = False
+            
+            # Stop recording
+            if self.live_audio_capture and self.is_recording:
+                self.live_audio_capture.stop_recording()
+                self.is_recording = False
+            
+            # Clean up resources
+            self._cleanup_resources()
+            
+            # Update UI
+            self.live_status_var.set("Ready")
+            self.start_button.config(text="Start Recording", state="normal")
+        
+        except Exception as e:
+            self.live_status_var.set("Error")
+            messagebox.showerror("Error", f"Failed to stop recording: {e}")
+            self.start_button.config(text="Start Recording", state="normal")
+    
+    def _cleanup_resources(self):
+        """Clean up resources and release memory."""
+        # Wait for processing thread to finish
+        if hasattr(self, 'processing_thread') and self.processing_thread and self.processing_thread.is_alive():
+            self.processing_thread.join(timeout=1.0)
+        
+        # Clear audio queue
+        if self.live_audio_capture:
+            while not self.live_audio_capture.audio_queue.empty():
+                try:
+                    self.live_audio_capture.audio_queue.get_nowait()
+                except queue.Empty:
+                    break
+        
+        # Reset instances
+        self.live_audio_capture = None
+        self.live_transcriber = None
+        self.processing_thread = None
+    
+    def _process_audio(self):
+        """Process audio from the recorder and send to transcriber"""
+        while self.is_recording or not self.live_audio_capture.audio_queue.empty():
+            frames = self.live_audio_capture.get_audio()
+            if frames is not None and len(frames) > 0:
+                self.live_transcriber.add_audio_data(frames)
+            time.sleep(0.1)
+    
+    def _update_live_transcription(self, text):
+        """Update the live transcription text area with the result."""
+        if not text:
+            return
+            
+        self.live_transcription_text.config(state=tk.NORMAL)
+        if self.live_transcription_text.index('end-1c') != '1.0':
+            self.live_transcription_text.insert(tk.END, " ")
+        self.live_transcription_text.insert(tk.END, text)
+        self.live_transcription_text.see(tk.END)
+        self.live_transcription_text.config(state=tk.DISABLED)
     
     def change_engine(self):
         """Change the transcription engine."""
@@ -316,6 +528,30 @@ class TranscriberApp:
         # Reinitialize the transcriber
         try:
             self.transcriber = AudioTranscriber()
+            
+            # Also reinitialize the live transcriber if it exists
+            if self.live_transcriber:
+                # Stop transcription if running
+                if self.is_transcribing:
+                    self.live_transcriber.stop_transcription()
+                    self.is_transcribing = False
+                
+                # Create a new live transcriber
+                def transcription_callback(text):
+                    if text:
+                        # Update the UI with the result
+                        self.root.after(0, lambda: self._update_live_transcription(text))
+                
+                self.live_transcriber = LiveTranscriber(
+                    config=self.config.config,
+                    transcription_callback=transcription_callback
+                )
+                
+                # Restart transcription if recording
+                if self.is_recording:
+                    self.live_transcriber.start_transcription()
+                    self.is_transcribing = True
+            
             messagebox.showinfo("Engine Changed", f"Transcription engine changed to {engine.capitalize()}.")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to initialize transcriber: {e}")
@@ -424,9 +660,21 @@ class TranscriberApp:
             "About Audio Transcriber",
             "Audio Transcriber\n\n"
             "A tool for transcribing audio from MP4 or WAV files\n"
-            "using offline speech recognition engines.\n\n"
+            "and capturing live audio for real-time transcription.\n\n"
             "Supported engines: Vosk, Whisper"
         )
+    
+    def on_close(self):
+        """Handle window close event."""
+        # Stop recording if active
+        if self.is_recording:
+            self.stop_recording()
+        
+        # Clean up resources
+        self._cleanup_resources()
+        
+        # Destroy the window
+        self.root.destroy()
 
 
 def main():
