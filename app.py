@@ -40,10 +40,6 @@ class TranscriberApp:
         # Load configuration
         self.config = get_config()
 
-        self.transcriber = None
-        self.mic_transcriber = None
-        self.system_transcriber = None
-
         # Set up the transcriber
         self.setup_transcriber()
         
@@ -563,16 +559,21 @@ class TranscriberApp:
         
         # Clear audio queue
         if self.live_audio_capture:
-            while not self.live_audio_capture.audio_queue.empty():
+            while not self.live_audio_capture.mic_queue.empty():
                 try:
-                    self.live_audio_capture.audio_queue.get_nowait()
+                    self.live_audio_capture.mic_queue.get_nowait()
+                except queue.Empty:
+                    break
+            while not self.live_audio_capture.system_queue.empty():
+                try:
+                    self.live_audio_capture.system_queue.get_nowait()
                 except queue.Empty:
                     break
         
         # Reset instances
-        self.live_audio_capture = None
-        self.live_transcriber = None
-        self.processing_thread = None
+        # self.live_audio_capture = None
+        # self.live_transcriber = None
+        # self.processing_thread = None
     
     def _process_audio(self):
         """Process audio from both channels and send to respective transcribers"""
@@ -733,7 +734,7 @@ class TranscriberApp:
         
         # Reinitialize the transcriber
         try:
-            self.transcriber = AudioTranscriber()
+            self.setup_transcriber()
             messagebox.showinfo("Settings Saved", "Settings saved successfully.")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to initialize transcriber: {e}")

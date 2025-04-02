@@ -3,6 +3,7 @@
 import os
 import json
 from pathlib import Path
+from typing import Any
 
 # Default configuration
 DEFAULT_CONFIG = {
@@ -91,7 +92,7 @@ class Config:
         """Save current configuration to file."""
         self._save_config(self.config)
     
-    def get(self, key, default=None):
+    def get(self, key, default=None) -> Any:
         """Get a configuration value.
         
         Args:
@@ -133,7 +134,7 @@ class Config:
         else:
             self.config[key] = value
     
-    def get_engine(self):
+    def get_engine(self) -> str:
         """Get the configured speech recognition engine.
         
         Returns:
