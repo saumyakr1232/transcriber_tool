@@ -22,11 +22,18 @@ class LiveTranscriptionApp:
         # Initialize our modules
         self.recorder = AudioRecorder()
         
-        # Create transcriber with callback for transcriptions
-        self.transcription_queue = queue.Queue()
-        self.transcriber = LiveTranscriber(
+        # Create separate transcribers for mic and system audio
+        self.mic_queue = queue.Queue()
+        self.system_queue = queue.Queue()
+        
+        self.mic_transcriber = LiveTranscriber(
             config=self.config,
-            transcription_callback=self.handle_transcription
+            transcription_callback=self.handle_mic_transcription
+        )
+        
+        self.system_transcriber = LiveTranscriber(
+            config=self.config,
+            transcription_callback=self.handle_system_transcription
         )
         
         # Set up the UI
@@ -71,11 +78,16 @@ class LiveTranscriptionApp:
         self.stop_button.state(["!disabled"])
         self.status_label.config(text="Status: Transcribing...")
         
+        # Configure text colors
+        self.transcription_text.tag_configure("blue", foreground="blue")
+        self.transcription_text.tag_configure("green", foreground="green")
+        
         # Start recording
         self.recorder.start_recording()
         
-        # Start the transcriber
-        self.transcriber.start_transcription()
+        # Start both transcribers
+        self.mic_transcriber.start_transcription()
+        self.system_transcriber.start_transcription()
         
         # Start processing in a separate thread
         self.processing_thread = threading.Thread(target=self.process_audio)
@@ -84,7 +96,8 @@ class LiveTranscriptionApp:
     
     def stop_transcription(self):
         self.recorder.stop_recording()
-        self.transcriber.stop_transcription()
+        self.mic_transcriber.stop_transcription()
+        self.system_transcriber.stop_transcription()
         
         self.stop_button.state(["disabled"])
         self.start_button.state(["!disabled"])
@@ -95,31 +108,52 @@ class LiveTranscriptionApp:
         self.transcription_text.delete(1.0, tk.END)
         self.transcription_text.config(state=tk.DISABLED)
     
-    def handle_transcription(self, text):
-        """Callback function for transcription results"""
+    def handle_mic_transcription(self, text):
+        """Callback function for microphone transcription results"""
         if text:
-            self.transcription_queue.put(text)
+            self.mic_queue.put((text, "blue"))
+    
+    def handle_system_transcription(self, text):
+        """Callback function for system audio transcription results"""
+        if text:
+            self.system_queue.put((text, "green"))
     
     def process_audio(self):
-        """Process audio from the recorder and send to transcriber"""
-        while self.recorder.is_recording or not self.recorder.audio_queue.empty():
-            frames = self.recorder.get_audio()
-            if frames is not None and len(frames) > 0:  # Check if frames exist and contain data
-                # Send audio to transcriber
-                self.transcriber.add_audio_data(frames)
+        """Process audio from both channels and send to respective transcribers"""
+        while self.recorder.is_recording or not (self.recorder.mic_queue.empty() and self.recorder.system_queue.empty()):
+            # Process microphone audio
+            mic_frames = self.recorder.get_mic_audio()
+            if mic_frames is not None and len(mic_frames) > 0:
+                self.mic_transcriber.add_audio_data(mic_frames)
+            
+            # Process system audio
+            system_frames = self.recorder.get_system_audio()
+            if system_frames is not None and len(system_frames) > 0:
+                self.system_transcriber.add_audio_data(system_frames)
             
             time.sleep(0.1)
     
     def process_transcription_queue(self):
-        """Process transcriptions from the queue and update UI"""
-        # Check for transcriptions from the callback queue
-        if not self.transcription_queue.empty():
-            transcription = self.transcription_queue.get()
+        """Process transcriptions from both queues and update UI with colored text"""
+        # Process microphone transcriptions
+        if not self.mic_queue.empty():
+            transcription, color = self.mic_queue.get()
             
             self.transcription_text.config(state=tk.NORMAL)
             if self.transcription_text.index('end-1c') != '1.0':
                 self.transcription_text.insert(tk.END, " ")
-            self.transcription_text.insert(tk.END, transcription)
+            self.transcription_text.insert(tk.END, transcription, color)
+            self.transcription_text.see(tk.END)
+            self.transcription_text.config(state=tk.DISABLED)
+        
+        # Process system transcriptions
+        if not self.system_queue.empty():
+            transcription, color = self.system_queue.get()
+            
+            self.transcription_text.config(state=tk.NORMAL)
+            if self.transcription_text.index('end-1c') != '1.0':
+                self.transcription_text.insert(tk.END, " ")
+            self.transcription_text.insert(tk.END, transcription, color)
             self.transcription_text.see(tk.END)
             self.transcription_text.config(state=tk.DISABLED)
         

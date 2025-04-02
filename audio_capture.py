@@ -13,7 +13,8 @@ from typing import Optional, Dict, Any, Tuple
 # Import necessary libraries
 try:
     import numpy as np
-    import sounddevice as sd
+    import pyaudiowpatch as pyaudiow
+    import pyaudio
     from pydub import AudioSegment
 except ImportError as e:
     print(f"Error: Required module not found: {e}")
@@ -62,8 +63,11 @@ class AudioCapture:
         self.system_thread = None
         self.mic_thread = None
         
+        # Initialize PyAudio instances
+        self.pa_system = pyaudiow.PyAudio()
+        self.pa_mic = pyaudio.PyAudio()
+        
         # Get available devices
-        self.devices = sd.query_devices()
         self.system_output_device = self._find_system_output_device()
         self.mic_input_device = self._find_mic_input_device()
         
@@ -72,50 +76,41 @@ class AudioCapture:
         
         if self.mic_input_device is None:
             print("Warning: Could not find microphone input device. Microphone capture may not work.")
+        
+        # Recording streams
+        self.system_stream = None
+        self.mic_stream = None
     
     def _find_system_output_device(self) -> Optional[Dict]:
-        """Find the system output device for recording.
-        
-        On macOS, this requires a virtual audio device like BlackHole or Soundflower
-        to be installed and configured as the audio output.
+        """Find the system output device for recording using WASAPI loopback.
         
         Returns:
             Dictionary with device info of the system output device, or None if not found
         """
-        # Look for virtual audio devices first (BlackHole, Soundflower, etc.)
-        virtual_device_keywords = ['blackhole', 'soundflower', 'loopback', 'virtual']
-        
-        for device in self.devices:
-            # Check if this is a virtual audio device by name
-            device_name = device['name'].lower()
-            is_virtual = any(keyword in device_name for keyword in virtual_device_keywords)
-            
-            # Virtual devices should have input channels to capture system audio
-            if is_virtual and device['max_input_channels'] > 0:
-                print(f"Found virtual audio device: {device['name']}")
-                return {
-                    'index': device['index'],
-                    'channels': min(2, device['max_input_channels'])
-                }
-        
-        # If no virtual device found, try to use the default output device
-        # (this won't work on macOS without additional software)
         try:
-            device_info = sd.query_devices(kind='output')
-            print("Warning: No virtual audio device found. System audio capture may not work.")
-            print("On macOS, you need to install BlackHole or Soundflower to capture system audio.")
-            print("See README_audio_capture.md for instructions.")
+            # Get default WASAPI info
+            wasapi_info = self.pa_system.get_host_api_info_by_type(pyaudiow.paWASAPI)
             
-            # Check if the device has input channels (unlikely for regular output devices)
-            if device_info['max_input_channels'] > 0:
-                return {
-                    'index': device_info['index'],
-                    'channels': min(2, device_info['max_input_channels'])
-                }
-            else:
-                print(f"Output device {device_info['name']} has no input channels and cannot be used for recording.")
-                return None
-                
+            # Get default WASAPI speakers
+            default_speakers = self.pa_system.get_device_info_by_index(wasapi_info["defaultOutputDevice"])
+            
+            if not default_speakers.get("isLoopbackDevice", False):
+                # Try to find loopback device with same name
+                for loopback in self.pa_system.get_loopback_device_info_generator():
+                    if default_speakers["name"] in loopback["name"]:
+                        default_speakers = loopback
+                        break
+                else:
+                    print("Default loopback output device not found.")
+                    return None
+            
+            print(f"Found system output device: {default_speakers['name']}")
+            return {
+                'index': default_speakers['index'],
+                'channels': default_speakers['maxInputChannels'],
+                'rate': int(default_speakers['defaultSampleRate'])
+            }
+            
         except Exception as e:
             print(f"Error finding system output device: {e}")
             return None
@@ -127,79 +122,83 @@ class AudioCapture:
             Dictionary with device info of the default microphone input device, or None if not found
         """
         try:
-            # Try to get the default input device
-            device_info = sd.query_devices(kind='input')
+            # Get default input device
+            default_input = self.pa_mic.get_default_input_device_info()
+            print(f"Found microphone input device: {default_input['name']}")
             return {
-                'index': device_info['index'],
-                'channels': min(2, device_info['max_input_channels'])
+                'index': default_input['index'],
+                'channels': min(2, default_input['maxInputChannels']),
+                'rate': int(default_input['defaultSampleRate'])
             }
         except Exception as e:
             print(f"Error finding microphone input device: {e}")
-            
-            # Try to find any input device
-            for device in self.devices:
-                if device['max_input_channels'] > 0:
-                    print(f"Using alternative input device: {device['name']}")
-                    return {
-                        'index': device['index'],
-                        'channels': min(2, device['max_input_channels'])
-                    }
-            
             return None
     
     def _record_system_audio(self):
-        """Record audio from the system output device.
-        
-        On macOS, this requires a virtual audio device like BlackHole or Soundflower
-        to be installed and configured as the audio output.
-        """
+        """Record audio from the system output device using WASAPI loopback."""
         try:
-            # Calculate buffer size based on sample rate to ensure accurate timing
-            # Using 0.05 seconds of audio per buffer for better timing accuracy
-            # Smaller buffer size helps prevent timing issues
-            buffer_size = int(self.sample_rate * 0.05)  # 0.05 second buffer
+            def callback(in_data, frame_count, time_info, status):
+                """Callback for system audio stream"""
+                if self.is_recording:
+                    self.system_audio_data.append(np.frombuffer(in_data, dtype=np.int16))
+                return (in_data, pyaudiow.paContinue)
             
-            # Use blocksize parameter to ensure consistent timing
-            with sd.InputStream(device=self.system_output_device['index'],
-                            samplerate=self.sample_rate,
-                            channels=self.system_output_device['channels'],
-                            blocksize=buffer_size,
-                            dtype=self.dtype) as stream:
-                while self.is_recording:
-                    data, overflowed = stream.read(buffer_size)
-                    if overflowed:
-                        print("System audio buffer overflowed")
-                    self.system_audio_data.append(data.copy())
-                    # Small sleep to prevent CPU overuse and ensure timing accuracy
-                    time.sleep(0.001)
+            # Open system audio stream with callback
+            self.system_stream = self.pa_system.open(
+                format=pyaudiow.paInt16,
+                channels=self.system_output_device['channels'],
+                rate=self.system_output_device['rate'],
+                frames_per_buffer=1024,
+                input=True,
+                input_device_index=self.system_output_device['index'],
+                stream_callback=callback
+            )
+            
+            self.system_stream.start_stream()
+            
+            while self.is_recording:
+                time.sleep(0.1)
+                
+            self.system_stream.stop_stream()
+            self.system_stream.close()
+            self.system_stream = None
+            
         except Exception as e:
             print(f"Error recording system audio: {e}")
-            print("On macOS, you need to install a virtual audio device like BlackHole or Soundflower")
-            print("and configure your system to route audio through it.")
-            print("See README_audio_capture.md for instructions.")
-            # Set empty data so the recording can continue with just microphone
             self.system_audio_data = []
     
     def _record_mic_audio(self):
         """Record audio from the microphone input device."""
-        # Calculate buffer size based on sample rate to ensure accurate timing
-        # Using 0.05 seconds of audio per buffer for better timing accuracy
-        # Smaller buffer size helps prevent timing issues
-        buffer_size = int(self.sample_rate * 0.05)  # 0.05 second buffer
-        
-        # Use blocksize parameter to ensure consistent timing
-        with sd.InputStream(device=self.mic_input_device['index'],
-                           samplerate=self.sample_rate,
-                           channels=self.mic_input_device['channels'],
-                           blocksize=buffer_size,
-                           dtype=self.dtype) as stream:
+        try:
+            def callback(in_data, frame_count, time_info, status):
+                """Callback for microphone stream"""
+                if self.is_recording:
+                    self.mic_audio_data.append(np.frombuffer(in_data, dtype=np.int16))
+                return (in_data, pyaudio.paContinue)
+            
+            # Open microphone stream with callback
+            self.mic_stream = self.pa_mic.open(
+                format=pyaudio.paInt16,
+                channels=self.mic_input_device['channels'],
+                rate=self.mic_input_device['rate'],
+                frames_per_buffer=1024,
+                input=True,
+                input_device_index=self.mic_input_device['index'],
+                stream_callback=callback
+            )
+            
+            self.mic_stream.start_stream()
+            
             while self.is_recording:
-                data, overflowed = stream.read(buffer_size)
-                if overflowed:
-                    print("Microphone audio buffer overflowed")
-                self.mic_audio_data.append(data.copy())
-                # Small sleep to prevent CPU overuse and ensure timing accuracy
-                time.sleep(0.001)
+                time.sleep(0.1)
+                
+            self.mic_stream.stop_stream()
+            self.mic_stream.close()
+            self.mic_stream = None
+            
+        except Exception as e:
+            print(f"Error recording microphone audio: {e}")
+            self.mic_audio_data = []
     
     def start_recording(self):
         """Start recording audio from both system output and microphone."""
@@ -350,6 +349,12 @@ class AudioCapture:
         else:
             system_audio = np.vstack(self.system_audio_data) if self.system_audio_data else np.array([])
             mic_audio = np.vstack(self.mic_audio_data) if self.mic_audio_data else np.array([])
+        
+        # Clean up PyAudio instances
+        if hasattr(self, 'pa_system'):
+            self.pa_system.terminate()
+        if hasattr(self, 'pa_mic'):
+            self.pa_mic.terminate()
         
         # Check if we have any audio data
         if len(system_audio) == 0 and len(mic_audio) == 0:
