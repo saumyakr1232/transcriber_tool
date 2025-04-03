@@ -4,7 +4,7 @@ import os
 import sys
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, scrolledtext
 from pathlib import Path
 import time
 import tempfile
@@ -152,6 +152,14 @@ class TranscriberApp:
         self.notebook.add(self.file_tab, text="File Transcription")
         self.notebook.add(self.live_tab, text="Live Transcription")
         
+        # Initialize text summarizer
+        try:
+            from text_summarizer import TextSummarizer
+            self.summarizer = TextSummarizer()
+        except Exception as e:
+            print(f"Warning: Text summarization not available: {e}")
+            self.summarizer = None
+        
         # Create UI for file transcription tab
         self.create_file_tab()
         
@@ -249,6 +257,10 @@ class TranscriberApp:
         ttk.Button(button_frame, text="Transcribe", command=self.start_transcription).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Save", command=self.save_transcription).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Clear", command=self.clear_all).pack(side=tk.LEFT, padx=5)
+        
+        # Add summarize button if summarizer is available
+        if self.summarizer:
+            ttk.Button(button_frame, text="Summarize", command=self.summarize_transcription).pack(side=tk.LEFT, padx=5)
     
     def create_live_tab(self):
         """Create the UI for the live transcription tab."""
@@ -475,6 +487,61 @@ class TranscriberApp:
         self.transcription_text.delete(1.0, tk.END)
         self.status_var.set("Ready")
         self.progress_var.set(0)
+    
+    def summarize_transcription(self):
+        """Summarize the current transcription text."""
+        if not self.summarizer:
+            messagebox.showerror("Error", "Text summarization is not available.")
+            return
+        
+        # Get the current transcription text
+        text = self.transcription_text.get(1.0, tk.END).strip()
+        if not text:
+            messagebox.showwarning("Warning", "No text to summarize.")
+            return
+        
+        try:
+            # Update status
+            self.status_var.set("Summarizing...")
+            self.root.update()
+            
+            # Generate summary
+            summary = self.summarizer.summarize(text)
+            
+            if summary:
+                # Show summary in a new window
+                summary_window = tk.Toplevel(self.root)
+                summary_window.title("Text Summary")
+                summary_window.geometry("600x400")
+                
+                # Add text widget for summary
+                summary_text = scrolledtext.ScrolledText(summary_window, wrap=tk.WORD)
+                summary_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+                
+                # Insert summary
+                summary_text.insert(tk.END, summary)
+                summary_text.config(state=tk.DISABLED)
+                
+                # Add save button
+                def save_summary():
+                    file_path = filedialog.asksaveasfilename(
+                        defaultextension=".txt",
+                        filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+                    )
+                    if file_path:
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            f.write(summary)
+                        messagebox.showinfo("Success", "Summary saved successfully.")
+                
+                ttk.Button(summary_window, text="Save Summary", command=save_summary).pack(pady=10)
+            else:
+                messagebox.showerror("Error", "Failed to generate summary.")
+        
+        except Exception as e:
+            messagebox.showerror("Error", f"Error generating summary: {e}")
+        finally:
+            self.status_var.set("Ready")
+            self.root.update()
     
     def clear_live(self):
         """Clear the live transcription text."""
