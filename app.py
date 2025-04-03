@@ -155,7 +155,7 @@ class TranscriberApp:
         # Initialize text summarizer
         try:
             from text_summarizer import TextSummarizer
-            self.summarizer = TextSummarizer()
+            self.summarizer = TextSummarizer(self.config)
         except Exception as e:
             print(f"Warning: Text summarization not available: {e}")
             self.summarizer = None

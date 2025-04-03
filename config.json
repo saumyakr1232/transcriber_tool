@@ -1,17 +1,21 @@
 {
-    "engine": "whisper",
-    "models": {
-        "vosk": {
-            "model_path": "models/vosk-model-small-en-us-0.15"
-        },
-        "whisper": {
-            "model_size": "base",
-            "use_gpu": true,
-            "language": "English"
-        }
+  "engine": "whisper",
+  "models": {
+    "vosk": {
+      "model_path": "models/vosk-model-small-en-us-0.15"
     },
-    "transcription": {
-        "sample_rate": 16000,
-        "word_timestamps": false
+    "whisper": {
+      "model_size": "base",
+      "use_gpu": true,
+      "language": "English"
     }
+  },
+  "transcription": {
+    "sample_rate": 16000,
+    "word_timestamps": false
+  },
+  "summarizer": {
+    "model_name": "mistral",
+    "base_url": "http://localhost:11434"
+  }
 }
