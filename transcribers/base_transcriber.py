@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import os
 import tempfile
 from abc import ABC, abstractmethod

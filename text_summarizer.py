@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import os
 import sys
 from typing import Optional, Dict, Any
@@ -107,8 +105,8 @@ class TextSummarizer:
             texts = self.text_splitter.split_text(text)
             docs = [Document(page_content=t) for t in texts]
             
-            # Generate summary
-            summary = self.chain.run(docs)
+            # Generate summary using invoke instead of run
+            summary = self.chain.invoke({"input_documents": docs})["output_text"]
             
             return summary.strip()
             

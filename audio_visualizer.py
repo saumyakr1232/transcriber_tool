@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import numpy as np
 import tkinter as tk
 from typing import Optional, Dict, Any, Tuple, List, Callable
