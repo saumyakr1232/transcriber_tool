@@ -9,6 +9,8 @@ build/
 develop-eggs/
 dist/
 downloads/
+models/
+pretrained_models/
 eggs/
 .eggs/
 lib/

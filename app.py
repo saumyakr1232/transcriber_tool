@@ -10,6 +10,7 @@ import queue
 import traceback
 import customtkinter as ctk
 import ffmpeg
+import random
 
 # Set appearance mode and default color theme
 ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
@@ -22,6 +23,7 @@ try:
     from audio_recorder1 import AudioRecorder2  # Using AudioRecorder2 for dual audio capture
     from audio_visualizer import DualAudioVisualizer
     from live_transcriber import LiveTranscriber
+    from speaker_diarization import SpeakerDiarizer, PYANNOTE_AVAILABLE
     import numpy as np
 except ImportError as e:
     print(f"Error: Could not import required modules: {e}")
@@ -49,6 +51,9 @@ class TranscriberApp:
         # Set up the transcriber
         self.setup_transcriber()
 
+        # Set up speaker diarizer if available
+        self.setup_diarizer()
+
         # Live audio capture and transcription
         self.live_audio_capture = AudioRecorder2()
 
@@ -64,6 +69,9 @@ class TranscriberApp:
         # Create separate transcribers for mic and system audio
         self.mic_queue = queue.Queue()
         self.system_queue = queue.Queue()
+
+        # Speaker colors for diarization
+        self.speaker_colors = {}
 
         # Bind window close event
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -252,6 +260,37 @@ class TranscriberApp:
         ctk.CTkButton(output_input_frame, text="Browse", command=self.browse_output,
                       width=100).pack(side=tk.RIGHT, padx=5)
 
+        # Speaker diarization option (only show if pyannote.audio is available)
+        if PYANNOTE_AVAILABLE:
+            diarization_frame = ctk.CTkFrame(self.file_tab)
+            diarization_frame.pack(fill=tk.X, pady=10, padx=10)
+
+            diarization_header = ctk.CTkFrame(diarization_frame)
+            diarization_header.pack(fill=tk.X)
+
+            ctk.CTkLabel(diarization_header, text="Speaker Diarization",
+                         font=ctk.CTkFont(weight="bold")).pack(side=tk.LEFT, anchor=tk.W, pady=(5, 10))
+
+            # Checkbox for enabling speaker diarization
+            self.diarization_var = tk.BooleanVar(value=self.config.get("diarization.enabled", False))
+            self.diarization_checkbox = ctk.CTkCheckBox(diarization_header, text="Enable Speaker Identification",
+                                                        variable=self.diarization_var,
+                                                        command=self.toggle_diarization)
+            self.diarization_checkbox.pack(side=tk.LEFT, padx=20)
+
+            # HuggingFace token entry
+            token_frame = ctk.CTkFrame(diarization_frame)
+            token_frame.pack(fill=tk.X, pady=(0, 5))
+
+            ctk.CTkLabel(token_frame, text="HuggingFace Token:").pack(side=tk.LEFT, padx=(0, 5))
+
+            self.hf_token_var = tk.StringVar(value=self.config.get("diarization.hf_token", ""))
+            self.hf_token_entry = ctk.CTkEntry(token_frame, textvariable=self.hf_token_var, width=300, show="*")
+            self.hf_token_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+            ctk.CTkButton(token_frame, text="Save Token", command=self.save_hf_token,
+                          width=100).pack(side=tk.RIGHT, padx=5)
+
         # Transcription section
         transcription_frame = ctk.CTkFrame(self.file_tab)
         transcription_frame.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
@@ -388,6 +427,37 @@ class TranscriberApp:
         if filename:
             self.output_path.set(filename)
 
+    def setup_diarizer(self):
+        """Set up the speaker diarizer if pyannote.audio is available."""
+        if PYANNOTE_AVAILABLE:
+            try:
+                self.diarizer = SpeakerDiarizer(self.config.config)
+            except Exception as e:
+                print(f"Error initializing speaker diarizer: {e}")
+                self.diarizer = None
+        else:
+            self.diarizer = None
+
+    def toggle_diarization(self):
+        """Toggle speaker diarization on/off and save to config."""
+        enabled = self.diarization_var.get()
+        self.config.config["diarization"]["enabled"] = enabled
+        self.config.save()
+
+        # If enabling and diarizer is not initialized, try to initialize it
+        if enabled and not self.diarizer and PYANNOTE_AVAILABLE:
+            self.setup_diarizer()
+
+    def save_hf_token(self):
+        """Save the HuggingFace token to the config."""
+        token = self.hf_token_var.get()
+        self.config.config["diarization"]["hf_token"] = token
+        self.config.save()
+        messagebox.showinfo("Token Saved", "HuggingFace token has been saved to the configuration.")
+
+        # Reinitialize the diarizer with the new token
+        self.setup_diarizer()
+
     def start_transcription(self):
         """Start the transcription process in a separate thread."""
         # Check if a file is selected
@@ -420,45 +490,73 @@ class TranscriberApp:
             self.all_segments = []
             self.combined_text = ""
 
-            # Create a queue for tracking progress
-            self.chunk_progress_queue = queue.Queue()
+            # Check if speaker diarization is enabled
+            use_diarization = self.diarization_var.get() if hasattr(self, 'diarization_var') else False
 
-            # Create a temporary directory for chunks
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Start real progress tracking thread
-                progress_thread = threading.Thread(target=self._track_chunk_progress, daemon=True)
-                progress_thread.start()
+            if use_diarization and hasattr(self, 'diarizer') and self.diarizer:
+                # Update status
+                self.status_var.set("Performing speaker diarization...")
+                self.progress_var.set(0.1)
 
-                # Split audio into 5-minute chunks (300 seconds)
-                chunk_duration = 300  # seconds
-                chunk_paths = self._split_audio_file(file_path, temp_dir, chunk_duration)
+                # Perform speaker diarization and transcription
+                try:
+                    segments = self.diarizer.transcribe_with_speakers(file_path, self.transcriber.model)
+                    self.all_segments = segments
+                    self.combined_text = self.diarizer.format_transcript_with_speakers(segments)
 
-                self.total_chunks = len(chunk_paths)
-                self.status_var.set(f"Transcribing {self.total_chunks} chunks...")
+                    # Update the UI with the result
+                    self.root.after(0, lambda: self._update_transcription(self.combined_text, self.all_segments))
+                except Exception as e:
+                    traceback.print_exc()
+                    self._show_error(f"Speaker diarization failed: {e}")
+                    # Fall back to regular transcription
+                    self._perform_regular_transcription(file_path)
+            else:
+                # Perform regular transcription without speaker diarization
+                self._perform_regular_transcription(file_path)
 
-                # Process each chunk in parallel
-                chunk_threads = []
-                for i, chunk_path in enumerate(chunk_paths):
-                    thread = threading.Thread(
-                        target=self._process_chunk,
-                        args=(chunk_path, i, len(chunk_paths)),
-                        daemon=True
-                    )
-                    thread.start()
-                    chunk_threads.append(thread)
-
-                # Wait for all chunks to be processed
-                for thread in chunk_threads:
-                    thread.join()
-
-                # Sort segments by start time
-                self.all_segments.sort(key=lambda x: x.get("start", 0))
-
-                # Update the UI with the result
-                self.root.after(0, lambda: self._update_transcription(self.combined_text, self.all_segments))
         except Exception as e:
             traceback.print_exc()
             self._show_error(f"Transcription failed: {e}")
+
+    def _perform_regular_transcription(self, file_path):
+        """Perform regular transcription without speaker diarization."""
+        # Create a queue for tracking progress
+        self.chunk_progress_queue = queue.Queue()
+
+        # Create a temporary directory for chunks
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Start real progress tracking thread
+            progress_thread = threading.Thread(target=self._track_chunk_progress, daemon=True)
+            progress_thread.start()
+
+            # Split audio into 5-minute chunks (300 seconds)
+            chunk_duration = 300  # seconds
+            chunk_paths = self._split_audio_file(file_path, temp_dir, chunk_duration)
+
+            self.total_chunks = len(chunk_paths)
+            self.status_var.set(f"Transcribing {self.total_chunks} chunks...")
+
+            # Process each chunk in parallel
+            chunk_threads = []
+            for i, chunk_path in enumerate(chunk_paths):
+                thread = threading.Thread(
+                    target=self._process_chunk,
+                    args=(chunk_path, i, len(chunk_paths)),
+                    daemon=True
+                )
+                thread.start()
+                chunk_threads.append(thread)
+
+            # Wait for all chunks to be processed
+            for thread in chunk_threads:
+                thread.join()
+
+            # Sort segments by start time
+            self.all_segments.sort(key=lambda x: x.get("start", 0))
+
+            # Update the UI with the result
+            self.root.after(0, lambda: self._update_transcription(self.combined_text, self.all_segments))
 
     def _split_audio_file(self, file_path, temp_dir, chunk_duration):
         """Split the audio file into smaller chunks.
@@ -585,15 +683,55 @@ class TranscriberApp:
                 # Store segments for later use (e.g., adding subtitles)
                 self.segments = segments
 
-                for segment in segments:
-                    # Format timestamp as [MM:SS]
-                    start_time = segment.get("start", 0)
-                    minutes = int(start_time // 60)
-                    seconds = int(start_time % 60)
-                    timestamp = f"[{minutes:02d}:{seconds:02d}] "
+                # Check if we have speaker diarization segments
+                has_speaker_info = any('speaker' in segment for segment in segments)
 
-                    # Add the timestamped segment
-                    self.transcription_text.insert(tk.END, timestamp + segment["text"] + "\n\n")
+                if has_speaker_info:
+                    # Generate consistent colors for speakers if not already assigned
+                    for segment in segments:
+                        if 'speaker' in segment and segment['speaker'] not in self.speaker_colors:
+                            # Generate a random color for this speaker
+                            r = random.randint(0, 200)  # Avoid too dark colors
+                            g = random.randint(0, 200)
+                            b = random.randint(0, 200)
+                            color = f"#{r:02x}{g:02x}{b:02x}"
+                            self.speaker_colors[segment['speaker']] = color
+
+                    # Insert each segment with appropriate speaker color
+                    for segment in segments:
+                        if 'speaker' in segment:
+                            speaker = segment['speaker']
+                            start_time = segment.get('start', 0)
+                            end_time = segment.get('end', 0)
+                            text = segment.get('text', '')
+
+                            # Format timestamp
+                            start_minutes = int(start_time // 60)
+                            start_seconds = int(start_time % 60)
+                            end_minutes = int(end_time // 60)
+                            end_seconds = int(end_time % 60)
+                            timestamp = f"[{start_minutes:02d}:{start_seconds:02d}-{end_minutes:02d}:{end_seconds:02d}] "
+
+                            # Create a tag for this speaker if it doesn't exist
+                            tag_name = f"speaker_{speaker}"
+                            if tag_name not in self.transcription_text.tag_names():
+                                self.transcription_text.tag_configure(tag_name, foreground=self.speaker_colors[speaker])
+
+                            # Insert the speaker label and text with the tag
+                            speaker_label = f"[{speaker}] {timestamp}"
+                            self.transcription_text.insert(tk.END, speaker_label, tag_name)
+                            self.transcription_text.insert(tk.END, f"{text}\n\n")
+                else:
+                    # Regular timestamp segments without speaker info
+                    for segment in segments:
+                        # Format timestamp as [MM:SS]
+                        start_time = segment.get("start", 0)
+                        minutes = int(start_time // 60)
+                        seconds = int(start_time % 60)
+                        timestamp = f"[{minutes:02d}:{seconds:02d}] "
+
+                        # Add the timestamped segment
+                        self.transcription_text.insert(tk.END, timestamp + segment["text"] + "\n\n")
             else:
                 # Just insert the full text if no segments
                 self.segments = None
