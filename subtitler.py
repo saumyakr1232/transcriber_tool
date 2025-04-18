@@ -1,9 +1,9 @@
+from asyncio import threads
 import os
 import tempfile
-import re
-import numpy as np
 from moviepy.editor import TextClip, CompositeVideoClip, VideoFileClip
 from proglog import ProgressBarLogger
+from config import Config
 
 
 class MoviepyProgressLogger(ProgressBarLogger):
@@ -44,54 +44,56 @@ class MoviepyProgressLogger(ProgressBarLogger):
 class SubtitleAdder:
     """Module for adding subtitles to video clips and video files"""
 
-    def __init__(self, style="default", font="Arial", fontsize=40, color="white", stroke_color="black", stroke_width=1.5, progress_callback=None):
+    def __init__(self, config, progress_callback=None):
         """Initialize the subtitle adder
 
         Args:
-            style (str): Style of subtitles (default, tiktok, youtube, instagram)
-            font (str): Font to use for subtitles
-            fontsize (int): Font size for subtitles
-            color (str): Text color
-            stroke_color (str): Text stroke color
-            stroke_width (float): Text stroke width
             progress_callback (callable, optional): Callback function to report progress.
                 Should accept a float between 0-1 representing progress percentage.
+            config_path (str, optional): Path to config file. If None, default config.json is used.
         """
-        self.font = font
-        self.fontsize = fontsize
-        self.color = color
-        self.stroke_color = stroke_color
-        self.stroke_width = stroke_width
+        # Load configuration
+        self.config = config
+
+        # Get subtitle configuration
+        subtitle_config = self.config.get("subtitles", {})
+        default_style = subtitle_config.get("default_style", "default")
+
+        # Use provided style or default from config
+        self.style = default_style
+
+        # Initialize with default values that will be overridden by style
+        self.font = "Arial"
+        self.fontsize = 40
+        self.color = "white"
+        self.stroke_color = "black"
+        self.stroke_width = 1.5
+        self.bg_color = 'transparent'
         self.progress_callback = progress_callback
 
         # Apply preset styles
-        self._apply_style(style)
+        self._apply_style(self.style)
 
     def _apply_style(self, style):
         """Apply a preset subtitle style
 
         Args:
-            style (str): Style name (default, tiktok, youtube, instagram)
-        """
-        if style == "tiktok":
-            self.font = "Arial-Bold"
-            self.fontsize = 50
-            self.color = "white"
-            self.stroke_color = "black"
-            self.stroke_width = 2.0
-        elif style == "youtube":
-            self.font = "Arial"
-            self.fontsize = 45
-            self.color = "white"
-            self.stroke_color = "black"
-            self.stroke_width = 1.5
-        elif style == "instagram":
-            self.font = "Helvetica-Bold"
-            self.fontsize = 48
-            self.color = "white"
-            self.stroke_color = "black"
-            self.stroke_width = 1.8
-        # default style is already set in __init__
+            style (str): Style name (default, style1, youtube, style3)
+n        """
+        # Get styles from config
+        subtitle_config = self.config.get("subtitles", {})
+        styles = subtitle_config.get("styles", {})
+
+        # If style exists in config, apply it
+        if style in styles:
+            style_config = styles[style]
+            self.font = style_config.get("font", self.font)
+            self.fontsize = style_config.get("fontsize", self.fontsize)
+            self.color = style_config.get("color", self.color)
+            self.stroke_color = style_config.get("stroke_color", self.stroke_color)
+            self.stroke_width = style_config.get("stroke_width", self.stroke_width)
+            self.bg_color = style_config.get("bg_color", self.bg_color)
+        # If style not found, use default values already set in __init__
 
     def _create_subtitle_clip(self, text, duration, clip_size):
         """Create a subtitle clip with the given text
@@ -112,6 +114,7 @@ class SubtitleAdder:
             color=self.color,
             stroke_color=self.stroke_color,
             stroke_width=self.stroke_width,
+            bg_color=self.bg_color,
             method='caption',
             align='center',
             size=(clip_size[0] * 0.9, None)  # 90% of video width, auto height
@@ -285,3 +288,10 @@ class SubtitleAdder:
             self.progress_callback(1.0)
 
         return output_path
+
+
+if __name__ == "__main__":
+    from config import Config
+    config = Config()
+    s = SubtitleAdder(config)
+    print(s.style, s.font, s.fontsize, s.color, s.stroke_color, s.stroke_width, s.bg_color)

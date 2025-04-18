@@ -40,8 +40,8 @@ class TranscriberApp:
         """
         self.root = root
         self.root.title("Audio Transcriber")
-        self.root.geometry("800x600")
-        self.root.minsize(600, 400)
+        self.root.geometry("900x600")
+        self.root.minsize(800, 400)
 
         # Load configuration
         self.config = get_config()
@@ -719,7 +719,7 @@ class TranscriberApp:
                     f"Adding subtitles... {p}%" if message is None else message))
 
             # Create subtitle adder with default style and progress callback
-            subtitle_adder = SubtitleAdder(progress_callback=update_progress)
+            subtitle_adder = SubtitleAdder(config=self.config, progress_callback=update_progress)
 
             # Add subtitles to the video
             subtitle_adder.add_subtitles_to_video(
