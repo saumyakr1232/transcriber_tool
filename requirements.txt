@@ -12,3 +12,5 @@ soundfile>=0.13.1
 langchain>=0.3.22
 sounddevice>=0.5.1
 langchain_ollama
+moviepy>=1.0.3
+customtkinter>=5.2.0

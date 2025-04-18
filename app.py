@@ -2,12 +2,17 @@ import os
 import sys
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext
 from pathlib import Path
 import time
 import tempfile
 import queue
 import traceback
+import customtkinter as ctk
+
+# Set appearance mode and default color theme
+ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
+ctk.set_default_color_theme("blue")  # Themes: "blue" (standard), "green", "dark-blue"
 
 # Import our modules
 try:
@@ -30,7 +35,7 @@ class TranscriberApp:
         """Initialize the application.
 
         Args:
-            root: The tkinter root window
+            root: The customtkinter root window
         """
         self.root = root
         self.root.title("Audio Transcriber")
@@ -104,7 +109,7 @@ class TranscriberApp:
             )
 
             # Show loading dialog
-            loading_dialog = tk.Toplevel(self.root)
+            loading_dialog = ctk.CTkToplevel(self.root)
             loading_dialog.title("Loading Model")
             loading_dialog.geometry("300x150")
             loading_dialog.transient(self.root)
@@ -117,9 +122,10 @@ class TranscriberApp:
             ))
 
             # Add loading message and progress bar
-            ttk.Label(loading_dialog, text="Loading transcription model...", padding=10).pack()
-            progress = ttk.Progressbar(loading_dialog, mode='indeterminate')
+            ctk.CTkLabel(loading_dialog, text="Loading transcription model...", padx=10, pady=10).pack()
+            progress = ctk.CTkProgressBar(loading_dialog)
             progress.pack(padx=20, pady=10, fill=tk.X)
+            progress.configure(mode="indeterminate")
             progress.start()
 
             # Update the dialog
@@ -140,16 +146,20 @@ class TranscriberApp:
         # Create menu bar
         self.create_menu()
 
-        # Create a notebook for tabs
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Create a tabview for tabs
+        self.tabview = ctk.CTkTabview(self.root, corner_radius=10)
+        self.tabview.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         # Create tabs
-        self.file_tab = ttk.Frame(self.notebook, padding="10")
-        self.live_tab = ttk.Frame(self.notebook, padding="10")
+        self.tabview.add("File Transcription")
+        self.tabview.add("Live Transcription")
 
-        self.notebook.add(self.file_tab, text="File Transcription")
-        self.notebook.add(self.live_tab, text="Live Transcription")
+        # Set default tab
+        self.tabview.set("File Transcription")
+
+        # Get tab frames
+        self.file_tab = self.tabview.tab("File Transcription")
+        self.live_tab = self.tabview.tab("Live Transcription")
 
         # Initialize text summarizer
         try:
@@ -211,117 +221,139 @@ class TranscriberApp:
     def create_file_tab(self):
         """Create the UI for the file transcription tab."""
         # File selection section
-        file_frame = ttk.LabelFrame(self.file_tab, text="Select Audio File", padding="10")
-        file_frame.pack(fill=tk.X, pady=10)
+        file_frame = ctk.CTkFrame(self.file_tab)
+        file_frame.pack(fill=tk.X, pady=10, padx=10)
+
+        ctk.CTkLabel(file_frame, text="Select Audio File", font=ctk.CTkFont(
+            weight="bold")).pack(anchor=tk.W, pady=(5, 10))
+
+        file_input_frame = ctk.CTkFrame(file_frame)
+        file_input_frame.pack(fill=tk.X)
 
         self.file_path = tk.StringVar()
-        ttk.Entry(file_frame, textvariable=self.file_path, width=50).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        ttk.Button(file_frame, text="Browse", command=self.browse_file).pack(side=tk.RIGHT, padx=5)
+        ctk.CTkEntry(file_input_frame, textvariable=self.file_path, width=400).pack(
+            side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        ctk.CTkButton(file_input_frame, text="Browse", command=self.browse_file, width=100).pack(side=tk.RIGHT, padx=5)
 
         # Output file section
-        output_frame = ttk.LabelFrame(self.file_tab, text="Output File (Optional)", padding="10")
-        output_frame.pack(fill=tk.X, pady=10)
+        output_frame = ctk.CTkFrame(self.file_tab)
+        output_frame.pack(fill=tk.X, pady=10, padx=10)
+
+        ctk.CTkLabel(output_frame, text="Output File (Optional)",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor=tk.W, pady=(5, 10))
+
+        output_input_frame = ctk.CTkFrame(output_frame)
+        output_input_frame.pack(fill=tk.X)
 
         self.output_path = tk.StringVar()
-        ttk.Entry(output_frame, textvariable=self.output_path, width=50).pack(
-            side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        ttk.Button(output_frame, text="Browse", command=self.browse_output).pack(side=tk.RIGHT, padx=5)
+        ctk.CTkEntry(output_input_frame, textvariable=self.output_path,
+                     width=400).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        ctk.CTkButton(output_input_frame, text="Browse", command=self.browse_output,
+                      width=100).pack(side=tk.RIGHT, padx=5)
 
         # Transcription section
-        transcription_frame = ttk.LabelFrame(self.file_tab, text="Transcription", padding="10")
-        transcription_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        transcription_frame = ctk.CTkFrame(self.file_tab)
+        transcription_frame.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
 
-        # Transcription text area
-        self.transcription_text = tk.Text(transcription_frame, wrap=tk.WORD, height=10)
+        ctk.CTkLabel(transcription_frame, text="Transcription",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor=tk.W, pady=(5, 10))
+
+        # Transcription text area with scrollbar
+        text_container = ctk.CTkFrame(transcription_frame)
+        text_container.pack(fill=tk.BOTH, expand=True)
+
+        self.transcription_text = ctk.CTkTextbox(text_container, wrap="word")
         self.transcription_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
-
-        # Scrollbar for text area
-        scrollbar = ttk.Scrollbar(transcription_frame, command=self.transcription_text.yview)
-        scrollbar.pack(fill=tk.Y, side=tk.RIGHT)
-        self.transcription_text.config(yscrollcommand=scrollbar.set)
 
         # Progress bar
         self.progress_var = tk.DoubleVar()
-        self.progress = ttk.Progressbar(self.file_tab, variable=self.progress_var, maximum=100)
-        self.progress.pack(fill=tk.X, pady=10)
+        self.progress = ctk.CTkProgressBar(self.file_tab)
+        self.progress.pack(fill=tk.X, pady=10, padx=10)
+        self.progress.set(0)
 
         # Status label
         self.status_var = tk.StringVar(value="Ready")
-        status_label = ttk.Label(self.file_tab, textvariable=self.status_var)
-        status_label.pack(anchor=tk.W, pady=5)
+        status_label = ctk.CTkLabel(self.file_tab, textvariable=self.status_var)
+        status_label.pack(anchor=tk.W, pady=5, padx=10)
 
         # Buttons
-        button_frame = ttk.Frame(self.file_tab)
-        button_frame.pack(fill=tk.X, pady=10)
+        button_frame = ctk.CTkFrame(self.file_tab)
+        button_frame.pack(fill=tk.X, pady=10, padx=10)
 
-        ttk.Button(button_frame, text="Transcribe", command=self.start_transcription).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Save", command=self.save_transcription).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Clear", command=self.clear_all).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Add Subtitles", command=self.add_subtitles_to_video).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(button_frame, text="Transcribe", command=self.start_transcription).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(button_frame, text="Save", command=self.save_transcription).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(button_frame, text="Clear", command=self.clear_all).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(button_frame, text="Add Subtitles",
+                      command=self.add_subtitles_to_video).pack(side=tk.LEFT, padx=5)
 
         # Add summarize button if summarizer is available
         if self.summarizer:
-            ttk.Button(button_frame, text="Summarize", command=self.summarize_transcription).pack(side=tk.LEFT, padx=5)
+            ctk.CTkButton(button_frame, text="Summarize",
+                          command=self.summarize_transcription).pack(side=tk.LEFT, padx=5)
 
     def create_live_tab(self):
         """Create the UI for the live transcription tab."""
         # Device selection frame
-        device_frame = ttk.LabelFrame(self.live_tab, text="Audio Device Selection", padding="10")
-        device_frame.pack(fill=tk.X, pady=(0, 10))
+        device_frame = ctk.CTkFrame(self.live_tab)
+        device_frame.pack(fill=tk.X, pady=10, padx=10)
+
+        ctk.CTkLabel(device_frame, text="Audio Device Selection",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor=tk.W, pady=(5, 10))
+
+        # Device selection grid
+        device_grid = ctk.CTkFrame(device_frame)
+        device_grid.pack(fill=tk.X)
 
         # Microphone selection
-        ttk.Label(device_frame, text="Microphone:").grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
+        ctk.CTkLabel(device_grid, text="Microphone:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky=tk.W)
         self.mic_var = tk.StringVar()
-        self.mic_dropdown = ttk.Combobox(device_frame, textvariable=self.mic_var, state="readonly")
-        self.mic_dropdown['values'] = [str(mic) for mic in self.live_audio_capture.get_available_mics()]
-        if self.mic_dropdown['values']:
-            self.mic_dropdown.current(0)
-        self.mic_dropdown.grid(row=0, column=1, sticky=tk.EW)
+        self.mic_dropdown = ctk.CTkOptionMenu(device_grid, variable=self.mic_var, values=[
+                                              str(mic) for mic in self.live_audio_capture.get_available_mics()])
+        if self.mic_dropdown._values:
+            self.mic_var.set(self.mic_dropdown._values[0])
+        self.mic_dropdown.grid(row=0, column=1, sticky=tk.EW, pady=5)
 
         # System audio selection
-        ttk.Label(device_frame, text="System Audio:").grid(row=1, column=0, padx=(0, 5), sticky=tk.W)
+        ctk.CTkLabel(device_grid, text="System Audio:").grid(row=1, column=0, padx=(0, 5), pady=5, sticky=tk.W)
         self.system_var = tk.StringVar()
-        self.system_dropdown = ttk.Combobox(device_frame, textvariable=self.system_var, state="readonly")
-        self.system_dropdown['values'] = [str(dev) for dev in self.live_audio_capture.get_available_system_devices()]
-        if self.system_dropdown['values']:
-            self.system_dropdown.current(0)
-        self.system_dropdown.grid(row=1, column=1, sticky=tk.EW)
+        self.system_dropdown = ctk.CTkOptionMenu(device_grid, variable=self.system_var, values=[
+                                                 str(dev) for dev in self.live_audio_capture.get_available_system_devices()])
+        if self.system_dropdown._values:
+            self.system_var.set(self.system_dropdown._values[0])
+        self.system_dropdown.grid(row=1, column=1, sticky=tk.EW, pady=5)
 
         # Configure grid weights
-        device_frame.columnconfigure(1, weight=1)
+        device_grid.columnconfigure(1, weight=1)
 
         # Live transcription section
-        live_transcription_frame = ttk.LabelFrame(self.live_tab, text="Live Transcription", padding="10")
-        live_transcription_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        live_transcription_frame = ctk.CTkFrame(self.live_tab)
+        live_transcription_frame.pack(fill=tk.BOTH, expand=True, pady=10, padx=10)
+
+        ctk.CTkLabel(live_transcription_frame, text="Live Transcription",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor=tk.W, pady=(5, 10))
 
         # Add text widget for live transcription
-        self.live_transcription_text = tk.Text(live_transcription_frame, wrap=tk.WORD, height=10)
-        self.live_transcription_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        self.live_transcription_text = ctk.CTkTextbox(live_transcription_frame, wrap="word")
+        self.live_transcription_text.pack(fill=tk.BOTH, expand=True)
 
-        # Configure text colors
-        self.live_transcription_text.tag_configure("blue", foreground="blue")
-        self.live_transcription_text.tag_configure("green", foreground="green")
-
-        # Add scrollbar for live transcription
-        live_scrollbar = ttk.Scrollbar(live_transcription_frame, command=self.live_transcription_text.yview)
-        live_scrollbar.pack(fill=tk.Y, side=tk.RIGHT)
-        self.live_transcription_text.config(yscrollcommand=live_scrollbar.set)
+        # Configure text colors (will need to be handled differently in CTkTextbox)
+        # We'll use tags in the insert method
 
         # Status label
         self.live_status_var = tk.StringVar(value="Ready")
-        live_status_label = ttk.Label(self.live_tab, textvariable=self.live_status_var)
-        live_status_label.pack(anchor=tk.W, pady=5)
+        live_status_label = ctk.CTkLabel(self.live_tab, textvariable=self.live_status_var)
+        live_status_label.pack(anchor=tk.W, pady=5, padx=10)
 
         # Buttons
-        live_button_frame = ttk.Frame(self.live_tab)
-        live_button_frame.pack(fill=tk.X, pady=10)
+        live_button_frame = ctk.CTkFrame(self.live_tab)
+        live_button_frame.pack(fill=tk.X, pady=10, padx=10)
 
-        self.start_button = ttk.Button(live_button_frame, text="Start Recording", command=self.toggle_recording)
+        self.start_button = ctk.CTkButton(live_button_frame, text="Start Recording", command=self.toggle_recording)
         self.start_button.pack(side=tk.LEFT, padx=5)
 
-        ttk.Button(live_button_frame, text="Save Transcription",
-                   command=self.save_live_transcription).pack(side=tk.LEFT, padx=5)
-        ttk.Button(live_button_frame, text="Clear", command=self.clear_live).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(live_button_frame, text="Save Transcription",
+                      command=self.save_live_transcription).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(live_button_frame, text="Clear", command=self.clear_live).pack(side=tk.LEFT, padx=5)
 
         # Output file for live transcription
         self.live_output_path = tk.StringVar()
@@ -582,7 +614,7 @@ class TranscriberApp:
             return
 
         # Get the current transcription text
-        text = self.transcription_text.get(1.0, tk.END).strip()
+        text = self.transcription_text.get("0.0", "end").strip()
         if not text:
             messagebox.showwarning("Warning", "No text to summarize.")
             return
@@ -597,17 +629,24 @@ class TranscriberApp:
 
             if summary:
                 # Show summary in a new window
-                summary_window = tk.Toplevel(self.root)
+                summary_window = ctk.CTkToplevel(self.root)
                 summary_window.title("Text Summary")
                 summary_window.geometry("600x400")
 
                 # Add text widget for summary
-                summary_text = scrolledtext.ScrolledText(summary_window, wrap=tk.WORD)
+                summary_frame = ctk.CTkFrame(summary_window)
+                summary_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+                # Add title
+                ctk.CTkLabel(summary_frame, text="Summary", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(0, 10))
+
+                # Add text widget for summary
+                summary_text = ctk.CTkTextbox(summary_frame, wrap="word")
                 summary_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
                 # Insert summary
-                summary_text.insert(tk.END, summary)
-                summary_text.config(state=tk.DISABLED)
+                summary_text.insert("0.0", summary)
+                summary_text.configure(state="disabled")
 
                 # Add save button
                 def save_summary():
@@ -620,7 +659,7 @@ class TranscriberApp:
                             f.write(summary)
                         messagebox.showinfo("Success", "Summary saved successfully.")
 
-                ttk.Button(summary_window, text="Save Summary", command=save_summary).pack(pady=10)
+                ctk.CTkButton(summary_frame, text="Save Summary", command=save_summary).pack(pady=10)
             else:
                 messagebox.showerror("Error", "Failed to generate summary.")
 
@@ -783,23 +822,27 @@ class TranscriberApp:
         while not self.mic_queue.empty():
             transcription, color = self.mic_queue.get()
 
-            self.live_transcription_text.config(state=tk.NORMAL)
-            if self.live_transcription_text.index('end-1c') != '1.0':
-                self.live_transcription_text.insert(tk.END, "\n")
-            self.live_transcription_text.insert(tk.END, f"Mic: {transcription}", color)
-            self.live_transcription_text.see(tk.END)
-            self.live_transcription_text.config(state=tk.DISABLED)
+            # Insert with color formatting
+            if self.live_transcription_text.get("0.0", "end-1c") != "":
+                self.live_transcription_text.insert("end", "\n")
+
+            # Insert with color (blue for mic)
+            text_color = "#0000FF" if color == "blue" else "#000000"
+            self.live_transcription_text.insert("end", f"Mic: {transcription}", {"text_color": text_color})
+            self.live_transcription_text.see("end")
 
         # Process system transcriptions
         while not self.system_queue.empty():
             transcription, color = self.system_queue.get()
 
-            self.live_transcription_text.config(state=tk.NORMAL)
-            if self.live_transcription_text.index('end-1c') != '1.0':
-                self.live_transcription_text.insert(tk.END, "\n")
-            self.live_transcription_text.insert(tk.END, f"System: {transcription}", color)
-            self.live_transcription_text.see(tk.END)
-            self.live_transcription_text.config(state=tk.DISABLED)
+            # Insert with color formatting
+            if self.live_transcription_text.get("0.0", "end-1c") != "":
+                self.live_transcription_text.insert("end", "\n")
+
+            # Insert with color (green for system)
+            text_color = "#00AA00" if color == "green" else "#000000"
+            self.live_transcription_text.insert("end", f"System: {transcription}", {"text_color": text_color})
+            self.live_transcription_text.see("end")
 
         # Schedule the next check
         self.root.after(100, self.process_transcription_queue)
@@ -824,61 +867,76 @@ class TranscriberApp:
     def open_settings(self):
         """Open the settings dialog."""
         # Create a new top-level window
-        settings_window = tk.Toplevel(self.root)
+        settings_window = ctk.CTkToplevel(self.root)
         settings_window.title("Settings")
         settings_window.geometry("500x400")
         settings_window.minsize(400, 300)
         settings_window.transient(self.root)
         settings_window.grab_set()
 
-        # Create a notebook for tabs
-        notebook = ttk.Notebook(settings_window)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Create a tabview for tabs
+        tabview = ctk.CTkTabview(settings_window)
+        tabview.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         # Create tabs for different settings
-        general_tab = ttk.Frame(notebook, padding=10)
-        vosk_tab = ttk.Frame(notebook, padding=10)
-        whisper_tab = ttk.Frame(notebook, padding=10)
+        tabview.add("General")
+        tabview.add("Vosk")
+        tabview.add("Whisper")
 
-        notebook.add(general_tab, text="General")
-        notebook.add(vosk_tab, text="Vosk")
-        notebook.add(whisper_tab, text="Whisper")
+        # Set default tab
+        tabview.set("General")
+
+        # Get tab frames
+        general_tab = tabview.tab("General")
+        vosk_tab = tabview.tab("Vosk")
+        whisper_tab = tabview.tab("Whisper")
 
         # General settings
-        ttk.Label(general_tab, text="Engine:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        general_frame = ctk.CTkFrame(general_tab)
+        general_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        ctk.CTkLabel(general_frame, text="Engine:").grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
         engine_var = tk.StringVar(value=self.config.get_engine())
-        engine_combo = ttk.Combobox(general_tab, textvariable=engine_var, state="readonly")
-        engine_combo["values"] = TranscriberFactory.get_available_engines()
-        engine_combo.grid(row=0, column=1, sticky=tk.W, pady=5)
+        engine_combo = ctk.CTkOptionMenu(general_frame, variable=engine_var,
+                                         values=TranscriberFactory.get_available_engines())
+        engine_combo.grid(row=0, column=1, sticky=tk.W, pady=5, padx=5)
 
         # Vosk settings
-        ttk.Label(vosk_tab, text="Model Path:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        vosk_frame = ctk.CTkFrame(vosk_tab)
+        vosk_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        ctk.CTkLabel(vosk_frame, text="Model Path:").grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
         vosk_model_path = tk.StringVar(value=self.config.get("models.vosk.model_path", ""))
-        ttk.Entry(vosk_tab, textvariable=vosk_model_path, width=40).grid(row=0, column=1, sticky=tk.W, pady=5)
-        ttk.Button(vosk_tab, text="Browse", command=lambda: self._browse_model_dir(
-            vosk_model_path)).grid(row=0, column=2, padx=5)
+        ctk.CTkEntry(vosk_frame, textvariable=vosk_model_path, width=300).grid(
+            row=0, column=1, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkButton(vosk_frame, text="Browse", command=lambda: self._browse_model_dir(
+            vosk_model_path), width=80).grid(row=0, column=2, padx=5, pady=5)
 
         # Whisper settings
-        ttk.Label(whisper_tab, text="Model Size:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        whisper_frame = ctk.CTkFrame(whisper_tab)
+        whisper_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        ctk.CTkLabel(whisper_frame, text="Model Size:").grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
         whisper_model_size = tk.StringVar(value=self.config.get("models.whisper.model_size", "base"))
-        size_combo = ttk.Combobox(whisper_tab, textvariable=whisper_model_size, state="readonly")
-        size_combo["values"] = ["tiny", "base", "small", "medium", "large"]
-        size_combo.grid(row=0, column=1, sticky=tk.W, pady=5)
+        size_combo = ctk.CTkOptionMenu(whisper_frame, variable=whisper_model_size, values=[
+                                       "tiny", "base", "small", "medium", "large"])
+        size_combo.grid(row=0, column=1, sticky=tk.W, pady=5, padx=5)
 
-        ttk.Label(whisper_tab, text="Use GPU:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        ctk.CTkLabel(whisper_frame, text="Use GPU:").grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
         use_gpu = tk.BooleanVar(value=self.config.get("models.whisper.use_gpu", True))
-        ttk.Checkbutton(whisper_tab, variable=use_gpu).grid(row=1, column=1, sticky=tk.W, pady=5)
+        ctk.CTkSwitch(whisper_frame, text="", variable=use_gpu).grid(row=1, column=1, sticky=tk.W, pady=5, padx=5)
 
-        ttk.Label(whisper_tab, text="Language:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        ctk.CTkLabel(whisper_frame, text="Language:").grid(row=2, column=0, sticky=tk.W, pady=5, padx=5)
         language = tk.StringVar(value=self.config.get("models.whisper.language", ""))
-        ttk.Entry(whisper_tab, textvariable=language, width=10).grid(row=2, column=1, sticky=tk.W, pady=5)
-        ttk.Label(whisper_tab, text="(Leave empty for auto-detection)").grid(row=2, column=2, sticky=tk.W, pady=5)
+        ctk.CTkEntry(whisper_frame, textvariable=language, width=100).grid(row=2, column=1, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkLabel(whisper_frame, text="(Leave empty for auto-detection)").grid(row=2,
+                                                                                  column=2, sticky=tk.W, pady=5, padx=5)
 
         # Buttons
-        button_frame = ttk.Frame(settings_window)
+        button_frame = ctk.CTkFrame(settings_window)
         button_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        ttk.Button(button_frame, text="Save", command=lambda: self._save_settings(
+        ctk.CTkButton(button_frame, text="Save", command=lambda: self._save_settings(
             engine_var.get(),
             vosk_model_path.get(),
             whisper_model_size.get(),
@@ -887,7 +945,7 @@ class TranscriberApp:
             settings_window
         )).pack(side=tk.RIGHT, padx=5)
 
-        ttk.Button(button_frame, text="Cancel", command=settings_window.destroy).pack(side=tk.RIGHT, padx=5)
+        ctk.CTkButton(button_frame, text="Cancel", command=settings_window.destroy).pack(side=tk.RIGHT, padx=5)
 
     def _browse_model_dir(self, path_var):
         """Open a directory dialog to select a model directory."""
@@ -922,13 +980,23 @@ class TranscriberApp:
 
     def show_about(self):
         """Show the about dialog."""
-        messagebox.showinfo(
-            "About Audio Transcriber",
-            "Audio Transcriber\n\n"
-            "A tool for transcribing audio from MP4 or WAV files\n"
-            "and capturing live audio for real-time transcription.\n\n"
-            "Supported engines: Vosk, Whisper"
-        )
+        about_window = ctk.CTkToplevel(self.root)
+        about_window.title("About Audio Transcriber")
+        about_window.geometry("400x300")
+        about_window.transient(self.root)
+        about_window.grab_set()
+
+        # Add about text
+        about_frame = ctk.CTkFrame(about_window)
+        about_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(about_frame, text="Audio Transcriber", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=10)
+        ctk.CTkLabel(about_frame, text="A tool for transcribing audio from MP4 or WAV files\nand capturing live audio for real-time transcription.",
+                     font=ctk.CTkFont(size=14)).pack(pady=10)
+        ctk.CTkLabel(about_frame, text="Supported engines: Vosk, Whisper", font=ctk.CTkFont(size=14)).pack(pady=10)
+
+        # Close button
+        ctk.CTkButton(about_frame, text="Close", command=about_window.destroy).pack(pady=10)
 
     def on_close(self):
         """Handle window close event."""
@@ -945,7 +1013,7 @@ class TranscriberApp:
 
 def main():
     """Main function to run the application."""
-    root = tk.Tk()
+    root = ctk.CTk()
     app = TranscriberApp(root)
     root.mainloop()
 
