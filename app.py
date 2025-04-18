@@ -268,7 +268,6 @@ class TranscriberApp:
 
         # Progress bar
         self.progress_var = tk.DoubleVar()
-        self.progress_var.trace_add("write", lambda *args: print(self.progress_var.get()))
         self.progress = ctk.CTkProgressBar(self.file_tab, variable=self.progress_var)
         self.progress.pack(fill=tk.X, pady=10, padx=10)
         # self.progress.set(0)
@@ -547,12 +546,6 @@ class TranscriberApp:
             # Still report progress even on error
             self.chunk_progress_queue.put(1)
 
-    def _update_progress_thread(self):
-        """Update the progress bar periodically."""
-        # This method is kept for backward compatibility
-        progress_thread = threading.Thread(target=self._progress_simulator, daemon=True)
-        progress_thread.start()
-
     def _track_chunk_progress(self):
         """Track the progress of chunk transcription and update the progress bar."""
         processed = 0
@@ -576,19 +569,6 @@ class TranscriberApp:
 
         # Make sure we reach 100% when all chunks are processed
         self.root.after(0, lambda: self.progress_var.set(1.0))
-
-    def _progress_simulator(self):
-        """Simulate progress updates."""
-        for i in range(1, 101):
-            # Check if transcription is still running
-            if self.status_var.get() != "Transcribing...":
-                break
-
-            # Update progress - normalized to 0-1 range
-            self.root.after(0, lambda val=i/100: self.progress_var.set(val))
-
-            # Sleep for a short time
-            time.sleep(0.1)
 
     def _update_transcription(self, text, segments=None):
         """Update the transcription text area with the result."""
@@ -729,8 +709,17 @@ class TranscriberApp:
             # Import the subtitle adder
             from subtitler import SubtitleAdder
 
-            # Create subtitle adder with default style
-            subtitle_adder = SubtitleAdder()
+            # Progress callback function to update the progress bar
+            def update_progress(progress_value, message=None):
+                # progress_value is already normalized to 0-1
+                self.root.after(0, lambda val=progress_value: self.progress_var.set(val))
+                # Update status message with percentage
+                percent = int(progress_value * 100)
+                self.root.after(0, lambda p=percent: self.status_var.set(
+                    f"Adding subtitles... {p}%" if message is None else message))
+
+            # Create subtitle adder with default style and progress callback
+            subtitle_adder = SubtitleAdder(progress_callback=update_progress)
 
             # Add subtitles to the video
             subtitle_adder.add_subtitles_to_video(

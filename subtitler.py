@@ -1,13 +1,50 @@
 import os
 import tempfile
+import re
 import numpy as np
 from moviepy.editor import TextClip, CompositeVideoClip, VideoFileClip
+from proglog import ProgressBarLogger
+
+
+class MoviepyProgressLogger(ProgressBarLogger):
+    """Custom logger for tracking MoviePy progress"""
+
+    def __init__(self, progress_callback=None):
+        """Initialize the logger
+
+        Args:
+            progress_callback (callable, optional): Callback function to report progress.
+                Should accept a float between 0-1 representing progress percentage.
+        """
+        super().__init__()
+        self.progress_callback = progress_callback
+        self.last_progress = 0.0
+        self.last_message = ''
+        self.previous_percentage = 0
+
+    def callback(self, **changes):
+        # Every time the logger message is updated, this function is called with
+        # the `changes` dictionary of the form `parameter: new value`.
+        for (parameter, value) in changes.items():
+            # print ('Parameter %s is now %s' % (parameter, value))
+            self.last_message = value
+
+    def bars_callback(self, bar, attr, value, old_value=None):
+        # Every time the logger progress is updated, this function is called
+        if 'Writing video' in self.last_message:
+            percentage = (value / self.bars[bar]['total']) * 100
+            if percentage > 0 and percentage < 100:
+                if int(percentage) != self.previous_percentage:
+                    self.previous_percentage = int(percentage)
+                    if self.progress_callback:
+                        # Call the progress callback with normalized value (0-1)
+                        self.progress_callback(percentage / 100)
 
 
 class SubtitleAdder:
     """Module for adding subtitles to video clips and video files"""
 
-    def __init__(self, style="default", font="Arial", fontsize=40, color="white", stroke_color="black", stroke_width=1.5):
+    def __init__(self, style="default", font="Arial", fontsize=40, color="white", stroke_color="black", stroke_width=1.5, progress_callback=None):
         """Initialize the subtitle adder
 
         Args:
@@ -17,12 +54,15 @@ class SubtitleAdder:
             color (str): Text color
             stroke_color (str): Text stroke color
             stroke_width (float): Text stroke width
+            progress_callback (callable, optional): Callback function to report progress.
+                Should accept a float between 0-1 representing progress percentage.
         """
         self.font = font
         self.fontsize = fontsize
         self.color = color
         self.stroke_color = stroke_color
         self.stroke_width = stroke_width
+        self.progress_callback = progress_callback
 
         # Apply preset styles
         self._apply_style(style)
@@ -227,7 +267,21 @@ class SubtitleAdder:
             with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as temp_file:
                 output_path = temp_file.name
 
-        # Write the output video
-        final_video.write_videofile(output_path, codec="libx264", audio_codec="aac")
+        # Write the output video with progress tracking
+        progress_logger = None
+        if hasattr(self, 'progress_callback') and self.progress_callback:
+            progress_logger = MoviepyProgressLogger(self.progress_callback)
+
+        print("Progress callback ", progress_logger)
+        final_video.write_videofile(
+            output_path,
+            codec="libx264",
+            audio_codec="aac",
+            logger=progress_logger
+        )
+
+        # Ensure 100% completion is reported
+        if hasattr(self, 'progress_callback') and self.progress_callback:
+            self.progress_callback(1.0)
 
         return output_path
