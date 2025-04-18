@@ -68,11 +68,11 @@ class TextSummarizer:
             
             print(f"Using model: {model_name}", f"at base_url: {base_url}")
             # Parse model name and get appropriate chunk size
-            base_name, model_size = self._parse_model_name(model_name)
+            _, model_size = self._parse_model_name(model_name)
             chunk_size = self._get_chunk_size(model_size)
             
             # Initialize Ollama LLM
-            self.llm = OllamaLLM(model=base_name, base_url=base_url)
+            self.llm = OllamaLLM(model=model_name, base_url=base_url)
             
             # Initialize text splitter
             self.text_splitter = RecursiveCharacterTextSplitter(
