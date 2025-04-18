@@ -9,6 +9,7 @@ import tempfile
 import queue
 import traceback
 import customtkinter as ctk
+import ffmpeg
 
 # Set appearance mode and default color theme
 ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
@@ -267,9 +268,10 @@ class TranscriberApp:
 
         # Progress bar
         self.progress_var = tk.DoubleVar()
-        self.progress = ctk.CTkProgressBar(self.file_tab)
+        self.progress_var.trace_add("write", lambda *args: print(self.progress_var.get()))
+        self.progress = ctk.CTkProgressBar(self.file_tab, variable=self.progress_var)
         self.progress.pack(fill=tk.X, pady=10, padx=10)
-        self.progress.set(0)
+        # self.progress.set(0)
 
         # Status label
         self.status_var = tk.StringVar(value="Ready")
@@ -404,7 +406,7 @@ class TranscriberApp:
 
         # Update status
         self.status_var.set("Transcribing...")
-        self.progress_var.set(0)
+        self.progress_var.set(0.0)
 
         # Start transcription in a separate thread
         threading.Thread(target=self._transcribe_thread, daemon=True).start()
@@ -412,25 +414,168 @@ class TranscriberApp:
     def _transcribe_thread(self):
         """Run the transcription in a separate thread."""
         try:
-            # Update progress periodically
-            self._update_progress_thread()
+            # Set up chunking and progress tracking
+            file_path = self.file_path.get()
+            self.total_chunks = 0
+            self.processed_chunks = 0
+            self.all_segments = []
+            self.combined_text = ""
 
-            # Perform transcription with timestamps
-            text, segments = self.transcriber.transcribe_file_with_timestamps(self.file_path.get())
+            # Create a queue for tracking progress
+            self.chunk_progress_queue = queue.Queue()
 
-            # Store segments for later use (e.g., adding subtitles)
-            self.segments = segments
+            # Create a temporary directory for chunks
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Start real progress tracking thread
+                progress_thread = threading.Thread(target=self._track_chunk_progress, daemon=True)
+                progress_thread.start()
 
-            # Update the UI with the result
-            self.root.after(0, lambda: self._update_transcription(text, segments))
+                # Split audio into 5-minute chunks (300 seconds)
+                chunk_duration = 300  # seconds
+                chunk_paths = self._split_audio_file(file_path, temp_dir, chunk_duration)
+
+                self.total_chunks = len(chunk_paths)
+                self.status_var.set(f"Transcribing {self.total_chunks} chunks...")
+
+                # Process each chunk in parallel
+                chunk_threads = []
+                for i, chunk_path in enumerate(chunk_paths):
+                    thread = threading.Thread(
+                        target=self._process_chunk,
+                        args=(chunk_path, i, len(chunk_paths)),
+                        daemon=True
+                    )
+                    thread.start()
+                    chunk_threads.append(thread)
+
+                # Wait for all chunks to be processed
+                for thread in chunk_threads:
+                    thread.join()
+
+                # Sort segments by start time
+                self.all_segments.sort(key=lambda x: x.get("start", 0))
+
+                # Update the UI with the result
+                self.root.after(0, lambda: self._update_transcription(self.combined_text, self.all_segments))
         except Exception as e:
+            traceback.print_exc()
             self._show_error(f"Transcription failed: {e}")
+
+    def _split_audio_file(self, file_path, temp_dir, chunk_duration):
+        """Split the audio file into smaller chunks.
+
+        Args:
+            file_path: Path to the audio file
+            temp_dir: Directory to store the chunks
+            chunk_duration: Duration of each chunk in seconds
+
+        Returns:
+            List of paths to the chunked audio files
+        """
+        try:
+            # Get file extension
+            file_ext = os.path.splitext(file_path)[1].lower()
+            is_video = file_ext == ".mp4"
+
+            # Get file duration using ffmpeg
+            probe = ffmpeg.probe(file_path)
+            duration = float(probe['format']['duration'])
+
+            chunk_paths = []
+            # Create chunks based on duration
+            for i, start_time in enumerate(range(0, int(duration), chunk_duration)):
+                # Calculate end time (cap at total duration)
+                end_time = min(start_time + chunk_duration, duration)
+
+                # Create chunk file path
+                chunk_path = os.path.join(temp_dir, f"chunk_{i}.wav")
+
+                # Create the ffmpeg command to extract the chunk
+                (ffmpeg
+                    .input(file_path, ss=start_time, to=end_time)
+                    .output(chunk_path, acodec='pcm_s16le', ac=1, ar='16k')
+                    .overwrite_output()
+                    .run(quiet=True, capture_stdout=True, capture_stderr=True)
+                 )
+
+                chunk_paths.append(chunk_path)
+
+                # Update initial progress - normalized to 0-1 range
+                self.root.after(0, lambda val=(5+int(5*i/max(1, len(range(0, int(duration), chunk_duration)))))/100:
+                                self.progress_var.set(val))
+
+            return chunk_paths
+        except Exception as e:
+            print(f"Error splitting audio: {e}")
+            raise
+
+    def _process_chunk(self, chunk_path, chunk_index, total_chunks):
+        """Process a single audio chunk.
+
+        Args:
+            chunk_path: Path to the audio chunk
+            chunk_index: Index of the chunk
+            total_chunks: Total number of chunks
+        """
+        try:
+            # Transcribe the chunk
+            text, segments = self.transcriber.transcribe_file_with_timestamps(chunk_path)
+
+            # Adjust timestamps for this chunk
+            chunk_duration = 300  # seconds, same as in _split_audio_file
+            start_offset = chunk_index * chunk_duration
+
+            # Accurately adjust timestamps with precise offset calculation
+            for segment in segments:
+                if "start" in segment:
+                    segment["start"] = float(segment["start"]) + start_offset
+                if "end" in segment:
+                    segment["end"] = float(segment["end"]) + start_offset
+
+            # Add to all segments
+            self.all_segments.extend(segments)
+
+            # Append to combined text
+            if text:
+                self.combined_text += text + " "
+
+            # Report progress
+            self.chunk_progress_queue.put(1)
+
+        except Exception as e:
+            print(f"Error processing chunk {chunk_index}: {e}")
+            # Still report progress even on error
+            self.chunk_progress_queue.put(1)
 
     def _update_progress_thread(self):
         """Update the progress bar periodically."""
-        # This is a simple simulation since we don't have real progress info
+        # This method is kept for backward compatibility
         progress_thread = threading.Thread(target=self._progress_simulator, daemon=True)
         progress_thread.start()
+
+    def _track_chunk_progress(self):
+        """Track the progress of chunk transcription and update the progress bar."""
+        processed = 0
+        while processed < self.total_chunks:
+            try:
+                # Wait for a chunk to complete
+                self.chunk_progress_queue.get(timeout=0.5)
+                processed += 1
+                self.processed_chunks = processed
+
+                # Calculate progress percentage (10% for splitting + 90% for transcription)
+                if self.total_chunks > 0:
+                    progress = (10 + int(90 * processed / self.total_chunks)) / 100
+                    # Update the progress bar - already normalized to 0-1 range
+                    self.root.after(0, lambda val=progress: self.progress_var.set(val))
+                    # Update status
+                    self.root.after(0, lambda val=processed, total=self.total_chunks:
+                                    self.status_var.set(f"Transcribed {val}/{total} chunks..."))
+            except queue.Empty:
+                pass
+
+        # Make sure we reach 100% when all chunks are processed
+        self.root.after(0, lambda: self.progress_var.set(1.0))
 
     def _progress_simulator(self):
         """Simulate progress updates."""
@@ -439,8 +584,8 @@ class TranscriberApp:
             if self.status_var.get() != "Transcribing...":
                 break
 
-            # Update progress
-            self.root.after(0, lambda val=i: self.progress_var.set(val))
+            # Update progress - normalized to 0-1 range
+            self.root.after(0, lambda val=i/100: self.progress_var.set(val))
 
             # Sleep for a short time
             time.sleep(0.1)
@@ -449,7 +594,7 @@ class TranscriberApp:
         """Update the transcription text area with the result."""
         # Update status
         self.status_var.set("Transcription complete")
-        self.progress_var.set(100)
+        self.progress_var.set(1.0)
 
         # Update text area
         if text:
@@ -542,7 +687,7 @@ class TranscriberApp:
         self.output_path.set("")
         self.transcription_text.delete(1.0, tk.END)
         self.status_var.set("Ready")
-        self.progress_var.set(0)
+        self.progress_var.set(0.0)
 
     def add_subtitles_to_video(self):
         """Add subtitles to the video file using the current transcription."""
@@ -572,7 +717,7 @@ class TranscriberApp:
 
         # Update status
         self.status_var.set("Adding subtitles...")
-        self.progress_var.set(0)
+        self.progress_var.set(0.0)
         self.root.update()
 
         # Start subtitle addition in a separate thread
@@ -604,7 +749,7 @@ class TranscriberApp:
     def _subtitles_complete(self, output_path):
         """Called when subtitle addition is complete."""
         self.status_var.set("Subtitles added successfully")
-        self.progress_var.set(100)
+        self.progress_var.set(1.0)
         messagebox.showinfo("Success", f"Subtitles added successfully. Video saved to:\n{output_path}")
 
     def summarize_transcription(self):

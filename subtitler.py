@@ -192,9 +192,13 @@ class SubtitleAdder:
         subtitle_clips = []
 
         for segment in segments:
-            # Get start and end times
-            start_time = segment.get("start", 0)
-            end_time = segment.get("end", start_time + 5)  # Default to 5 seconds if no end time
+            # Get start and end times - ensure floating point conversion
+            start_time = float(segment.get("start", 0))
+            # Default to 5 seconds if no end time
+            if "end" in segment:
+                end_time = float(segment.get("end"))
+            else:
+                end_time = start_time + 5
             duration = end_time - start_time
 
             # Format text
