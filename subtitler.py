@@ -1,11 +1,11 @@
 import os
 import tempfile
 import numpy as np
-from moviepy.editor import TextClip, CompositeVideoClip
+from moviepy.editor import TextClip, CompositeVideoClip, VideoFileClip
 
 
 class SubtitleAdder:
-    """Module for adding subtitles to video clips"""
+    """Module for adding subtitles to video clips and video files"""
 
     def __init__(self, style="default", font="Arial", fontsize=40, color="white", stroke_color="black", stroke_width=1.5):
         """Initialize the subtitle adder
@@ -173,3 +173,57 @@ class SubtitleAdder:
                 subtitled_clips.append(final_clip)
 
         return subtitled_clips
+
+    def add_subtitles_to_video(self, video_path, segments, output_path=None):
+        """Add subtitles to a video file using transcription segments
+
+        Args:
+            video_path (str): Path to the video file
+            segments (list): List of transcription segments with timestamps
+            output_path (str, optional): Path to save the output video. If None, a temp file is used.
+
+        Returns:
+            str: Path to the output video file with subtitles
+        """
+        # Load the video file
+        video = VideoFileClip(video_path)
+
+        # Create subtitle clips for each segment
+        subtitle_clips = []
+
+        for segment in segments:
+            # Get start and end times
+            start_time = segment.get("start", 0)
+            end_time = segment.get("end", start_time + 5)  # Default to 5 seconds if no end time
+            duration = end_time - start_time
+
+            # Format text
+            text = segment.get("text", "")
+            formatted_text = self._split_long_text(text)
+
+            # Create subtitle clip
+            subtitle = self._create_subtitle_clip(
+                formatted_text,
+                duration,
+                video.size
+            )
+
+            # Set start time
+            subtitle = subtitle.set_start(start_time)
+
+            subtitle_clips.append(subtitle)
+
+        # Composite video and all subtitle clips
+        final_video = CompositeVideoClip([video] + subtitle_clips)
+
+        # Determine output path
+        if output_path is None:
+            # Create a temporary file with the same extension as the input
+            _, ext = os.path.splitext(video_path)
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as temp_file:
+                output_path = temp_file.name
+
+        # Write the output video
+        final_video.write_videofile(output_path, codec="libx264", audio_codec="aac")
+
+        return output_path

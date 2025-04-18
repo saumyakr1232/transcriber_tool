@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 import tempfile
 import queue
+import traceback
 
 # Import our modules
 try:
@@ -256,6 +257,7 @@ class TranscriberApp:
         ttk.Button(button_frame, text="Transcribe", command=self.start_transcription).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Save", command=self.save_transcription).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Clear", command=self.clear_all).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Add Subtitles", command=self.add_subtitles_to_video).pack(side=tk.LEFT, padx=5)
 
         # Add summarize button if summarizer is available
         if self.summarizer:
@@ -384,6 +386,9 @@ class TranscriberApp:
             # Perform transcription with timestamps
             text, segments = self.transcriber.transcribe_file_with_timestamps(self.file_path.get())
 
+            # Store segments for later use (e.g., adding subtitles)
+            self.segments = segments
+
             # Update the UI with the result
             self.root.after(0, lambda: self._update_transcription(text, segments))
         except Exception as e:
@@ -420,6 +425,9 @@ class TranscriberApp:
 
             # If we have segments with timestamps, display them
             if segments and len(segments) > 0:
+                # Store segments for later use (e.g., adding subtitles)
+                self.segments = segments
+
                 for segment in segments:
                     # Format timestamp as [MM:SS]
                     start_time = segment.get("start", 0)
@@ -431,8 +439,10 @@ class TranscriberApp:
                     self.transcription_text.insert(tk.END, timestamp + segment["text"] + "\n\n")
             else:
                 # Just insert the full text if no segments
+                self.segments = None
                 self.transcription_text.insert(tk.END, text)
         else:
+            self.segments = None
             self._show_error("Transcription failed.")
 
     def _show_error(self, message):
@@ -501,6 +511,69 @@ class TranscriberApp:
         self.transcription_text.delete(1.0, tk.END)
         self.status_var.set("Ready")
         self.progress_var.set(0)
+
+    def add_subtitles_to_video(self):
+        """Add subtitles to the video file using the current transcription."""
+        # Check if a file is selected
+        if not self.file_path.get():
+            messagebox.showerror("Error", "Please select a video file.")
+            return
+
+        # Check if the file exists
+        if not os.path.exists(self.file_path.get()):
+            messagebox.showerror("Error", f"File {self.file_path.get()} does not exist.")
+            return
+
+        # Check if we have transcription segments
+        if not hasattr(self, 'segments') or not self.segments:
+            messagebox.showerror("Error", "No transcription segments available. Please transcribe the file first.")
+            return
+
+        # Ask for output file location
+        filetypes = [
+            ("MP4 Files", "*.mp4"),
+            ("All Files", "*.*")
+        ]
+        output_path = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=".mp4")
+        if not output_path:
+            return
+
+        # Update status
+        self.status_var.set("Adding subtitles...")
+        self.progress_var.set(0)
+        self.root.update()
+
+        # Start subtitle addition in a separate thread
+        threading.Thread(target=self._add_subtitles_thread, args=(output_path,), daemon=True).start()
+
+    def _add_subtitles_thread(self, output_path):
+        """Run the subtitle addition in a separate thread."""
+        try:
+            # Import the subtitle adder
+            from subtitler import SubtitleAdder
+
+            # Create subtitle adder with default style
+            subtitle_adder = SubtitleAdder()
+
+            # Add subtitles to the video
+            subtitle_adder.add_subtitles_to_video(
+                self.file_path.get(),
+                self.segments,
+                output_path
+            )
+
+            # Update UI
+            self.root.after(0, lambda: self._subtitles_complete(output_path))
+        except Exception as e:
+            traceback.print_exc()
+            error_message = f"Failed to add subtitles: {e}"
+            self.root.after(0, lambda msg=error_message: self._show_error(msg))
+
+    def _subtitles_complete(self, output_path):
+        """Called when subtitle addition is complete."""
+        self.status_var.set("Subtitles added successfully")
+        self.progress_var.set(100)
+        messagebox.showinfo("Success", f"Subtitles added successfully. Video saved to:\n{output_path}")
 
     def summarize_transcription(self):
         """Summarize the current transcription text."""
