@@ -1003,8 +1003,8 @@ class TranscriberApp:
         # Create a new top-level window
         settings_window = ctk.CTkToplevel(self.root)
         settings_window.title("Settings")
-        settings_window.geometry("500x400")
-        settings_window.minsize(400, 300)
+        settings_window.geometry("600x500")
+        settings_window.minsize(500, 400)
         settings_window.transient(self.root)
         settings_window.grab_set()
 
@@ -1016,6 +1016,8 @@ class TranscriberApp:
         tabview.add("General")
         tabview.add("Vosk")
         tabview.add("Whisper")
+        tabview.add("Subtitles")
+        tabview.add("Summarizer")
 
         # Set default tab
         tabview.set("General")
@@ -1024,6 +1026,8 @@ class TranscriberApp:
         general_tab = tabview.tab("General")
         vosk_tab = tabview.tab("Vosk")
         whisper_tab = tabview.tab("Whisper")
+        subtitles_tab = tabview.tab("Subtitles")
+        summarizer_tab = tabview.tab("Summarizer")
 
         # General settings
         general_frame = ctk.CTkFrame(general_tab)
@@ -1066,6 +1070,121 @@ class TranscriberApp:
         ctk.CTkLabel(whisper_frame, text="(Leave empty for auto-detection)").grid(row=2,
                                                                                   column=2, sticky=tk.W, pady=5, padx=5)
 
+        # Subtitles settings
+        subtitles_frame = ctk.CTkFrame(subtitles_tab)
+        subtitles_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Default style selection
+        ctk.CTkLabel(subtitles_frame, text="Default Style:").grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
+        default_style = tk.StringVar(value=self.config.get("subtitles.default_style", "default"))
+        style_combo = ctk.CTkOptionMenu(subtitles_frame, variable=default_style, values=["default", "youtube"])
+        style_combo.grid(row=0, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Style settings section
+        style_settings_frame = ctk.CTkFrame(subtitles_frame)
+        style_settings_frame.grid(row=1, column=0, columnspan=3, sticky=tk.NSEW, pady=10, padx=5)
+        subtitles_frame.columnconfigure(2, weight=1)
+
+        # Default style settings
+        ctk.CTkLabel(style_settings_frame, text="Default Style Settings", font=ctk.CTkFont(
+            weight="bold")).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5, padx=5)
+
+        # Font
+        ctk.CTkLabel(style_settings_frame, text="Font:").grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
+        default_font = tk.StringVar(value=self.config.get("subtitles.styles.default.font", "Arial"))
+        ctk.CTkEntry(style_settings_frame, textvariable=default_font, width=150).grid(
+            row=1, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Font size
+        ctk.CTkLabel(style_settings_frame, text="Font Size:").grid(row=2, column=0, sticky=tk.W, pady=5, padx=5)
+        default_fontsize = tk.StringVar(value=str(self.config.get("subtitles.styles.default.fontsize", 40)))
+        ctk.CTkEntry(style_settings_frame, textvariable=default_fontsize,
+                     width=50).grid(row=2, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Text color
+        ctk.CTkLabel(style_settings_frame, text="Text Color:").grid(row=3, column=0, sticky=tk.W, pady=5, padx=5)
+        default_color = tk.StringVar(value=self.config.get("subtitles.styles.default.color", "white"))
+        ctk.CTkEntry(style_settings_frame, textvariable=default_color, width=100).grid(
+            row=3, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Stroke color
+        ctk.CTkLabel(style_settings_frame, text="Stroke Color:").grid(row=4, column=0, sticky=tk.W, pady=5, padx=5)
+        default_stroke_color = tk.StringVar(value=self.config.get("subtitles.styles.default.stroke_color", "black"))
+        ctk.CTkEntry(style_settings_frame, textvariable=default_stroke_color,
+                     width=100).grid(row=4, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Stroke width
+        ctk.CTkLabel(style_settings_frame, text="Stroke Width:").grid(row=5, column=0, sticky=tk.W, pady=5, padx=5)
+        default_stroke_width = tk.StringVar(value=str(self.config.get("subtitles.styles.default.stroke_width", 1.5)))
+        ctk.CTkEntry(style_settings_frame, textvariable=default_stroke_width,
+                     width=50).grid(row=5, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Background color
+        ctk.CTkLabel(style_settings_frame, text="Background Color:").grid(row=6, column=0, sticky=tk.W, pady=5, padx=5)
+        default_bg_color = tk.StringVar(value=self.config.get("subtitles.styles.default.bg_color", "transparent"))
+        ctk.CTkEntry(style_settings_frame, textvariable=default_bg_color,
+                     width=100).grid(row=6, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # YouTube style settings
+        youtube_settings_frame = ctk.CTkFrame(subtitles_frame)
+        youtube_settings_frame.grid(row=2, column=0, columnspan=3, sticky=tk.NSEW, pady=10, padx=5)
+
+        ctk.CTkLabel(youtube_settings_frame, text="YouTube Style Settings", font=ctk.CTkFont(
+            weight="bold")).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5, padx=5)
+
+        # Font
+        ctk.CTkLabel(youtube_settings_frame, text="Font:").grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
+        youtube_font = tk.StringVar(value=self.config.get("subtitles.styles.youtube.font", "Helvetica-BoldOblique"))
+        ctk.CTkEntry(youtube_settings_frame, textvariable=youtube_font,
+                     width=150).grid(row=1, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Font size
+        ctk.CTkLabel(youtube_settings_frame, text="Font Size:").grid(row=2, column=0, sticky=tk.W, pady=5, padx=5)
+        youtube_fontsize = tk.StringVar(value=str(self.config.get("subtitles.styles.youtube.fontsize", 45)))
+        ctk.CTkEntry(youtube_settings_frame, textvariable=youtube_fontsize,
+                     width=50).grid(row=2, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Text color
+        ctk.CTkLabel(youtube_settings_frame, text="Text Color:").grid(row=3, column=0, sticky=tk.W, pady=5, padx=5)
+        youtube_color = tk.StringVar(value=self.config.get("subtitles.styles.youtube.color", "white"))
+        ctk.CTkEntry(youtube_settings_frame, textvariable=youtube_color,
+                     width=100).grid(row=3, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Stroke color
+        ctk.CTkLabel(youtube_settings_frame, text="Stroke Color:").grid(row=4, column=0, sticky=tk.W, pady=5, padx=5)
+        youtube_stroke_color = tk.StringVar(value=self.config.get("subtitles.styles.youtube.stroke_color", "black"))
+        ctk.CTkEntry(youtube_settings_frame, textvariable=youtube_stroke_color,
+                     width=100).grid(row=4, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Stroke width
+        ctk.CTkLabel(youtube_settings_frame, text="Stroke Width:").grid(row=5, column=0, sticky=tk.W, pady=5, padx=5)
+        youtube_stroke_width = tk.StringVar(value=str(self.config.get("subtitles.styles.youtube.stroke_width", 1.5)))
+        ctk.CTkEntry(youtube_settings_frame, textvariable=youtube_stroke_width,
+                     width=50).grid(row=5, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Background color
+        ctk.CTkLabel(youtube_settings_frame, text="Background Color:").grid(
+            row=6, column=0, sticky=tk.W, pady=5, padx=5)
+        youtube_bg_color = tk.StringVar(value=self.config.get("subtitles.styles.youtube.bg_color", "transparent"))
+        ctk.CTkEntry(youtube_settings_frame, textvariable=youtube_bg_color,
+                     width=100).grid(row=6, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Summarizer settings
+        summarizer_frame = ctk.CTkFrame(summarizer_tab)
+        summarizer_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Model name
+        ctk.CTkLabel(summarizer_frame, text="Model Name:").grid(row=0, column=0, sticky=tk.W, pady=5, padx=5)
+        model_name = tk.StringVar(value=self.config.get("summarizer.model_name", "mistral"))
+        ctk.CTkEntry(summarizer_frame, textvariable=model_name, width=150).grid(
+            row=0, column=1, sticky=tk.W, pady=5, padx=5)
+
+        # Base URL
+        ctk.CTkLabel(summarizer_frame, text="Base URL:").grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
+        base_url = tk.StringVar(value=self.config.get("summarizer.base_url", "http://localhost:11434"))
+        ctk.CTkEntry(summarizer_frame, textvariable=base_url, width=250).grid(
+            row=1, column=1, sticky=tk.W, pady=5, padx=5)
+
         # Buttons
         button_frame = ctk.CTkFrame(settings_window)
         button_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -1076,6 +1195,21 @@ class TranscriberApp:
             whisper_model_size.get(),
             use_gpu.get(),
             language.get(),
+            default_style.get(),
+            default_font.get(),
+            default_fontsize.get(),
+            default_color.get(),
+            default_stroke_color.get(),
+            default_stroke_width.get(),
+            default_bg_color.get(),
+            youtube_font.get(),
+            youtube_fontsize.get(),
+            youtube_color.get(),
+            youtube_stroke_color.get(),
+            youtube_stroke_width.get(),
+            youtube_bg_color.get(),
+            model_name.get(),
+            base_url.get(),
             settings_window
         )).pack(side=tk.RIGHT, padx=5)
 
@@ -1087,7 +1221,11 @@ class TranscriberApp:
         if directory:
             path_var.set(directory)
 
-    def _save_settings(self, engine, vosk_model_path, whisper_model_size, use_gpu, language, window):
+    def _save_settings(self, engine, vosk_model_path, whisper_model_size, use_gpu, language,
+                       default_style, default_font, default_fontsize, default_color, default_stroke_color,
+                       default_stroke_width, default_bg_color, youtube_font, youtube_fontsize,
+                       youtube_color, youtube_stroke_color, youtube_stroke_width, youtube_bg_color,
+                       model_name, base_url, window):
         """Save the settings and close the dialog."""
         # Update the configuration
         self.config.set("engine", engine)
@@ -1096,8 +1234,31 @@ class TranscriberApp:
         self.config.set("models.whisper.use_gpu", use_gpu)
         self.config.set("models.whisper.language", language)
 
+        # Update subtitle settings
+        self.config.set("subtitles.default_style", default_style)
+        self.config.set("subtitles.styles.default.font", default_font)
+        self.config.set("subtitles.styles.default.fontsize", int(default_fontsize))
+        self.config.set("subtitles.styles.default.color", default_color)
+        self.config.set("subtitles.styles.default.stroke_color", default_stroke_color)
+        self.config.set("subtitles.styles.default.stroke_width", float(default_stroke_width))
+        self.config.set("subtitles.styles.default.bg_color", default_bg_color)
+
+        self.config.set("subtitles.styles.youtube.font", youtube_font)
+        self.config.set("subtitles.styles.youtube.fontsize", int(youtube_fontsize))
+        self.config.set("subtitles.styles.youtube.color", youtube_color)
+        self.config.set("subtitles.styles.youtube.stroke_color", youtube_stroke_color)
+        self.config.set("subtitles.styles.youtube.stroke_width", float(youtube_stroke_width))
+        self.config.set("subtitles.styles.youtube.bg_color", youtube_bg_color)
+
+        # Update summarizer settings
+        self.config.set("summarizer.model_name", model_name)
+        self.config.set("summarizer.base_url", base_url)
+
         # Save the configuration
         self.config.save()
+
+        # Close the window
+        window.destroy()
 
         # Update the engine variable in the menu
         self.engine_var.set(engine)
