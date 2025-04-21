@@ -8,7 +8,7 @@ from langchain.docstore.document import Document
 from langchain.prompts import PromptTemplate
 
 from config import get_config
-from models import MeetingSummary
+from meeting_summary import MeetingSummary
 
 # Define prompt templates for extracting structured meeting summary
 MAP_TEMPLATE = """Summarize the following text from a meeting transcript:
