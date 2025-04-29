@@ -11,6 +11,13 @@ import traceback
 import customtkinter as ctk
 import ffmpeg
 
+import ssl
+import certifi
+import urllib.request
+
+ssl_context = ssl.create_default_context(cafile=certifi.where())
+
+
 # Set appearance mode and default color theme
 ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
 ctk.set_default_color_theme("blue")  # Themes: "blue" (standard), "green", "dark-blue"
@@ -64,6 +71,10 @@ class TranscriberApp:
         # Create separate transcribers for mic and system audio
         self.mic_queue = queue.Queue()
         self.system_queue = queue.Queue()
+        
+        # Audio input states
+        self.mic_enabled = True
+        self.system_enabled = True
 
         # Bind window close event
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -217,7 +228,7 @@ class TranscriberApp:
         help_menu.add_command(label="About", command=self.show_about)
         menubar.add_cascade(label="Help", menu=help_menu)
 
-        self.root.config(menu=menubar)
+        self.root.configure(menu=menubar)
 
     def create_file_tab(self):
         """Create the UI for the file transcription tab."""
@@ -313,6 +324,11 @@ class TranscriberApp:
         if self.mic_dropdown._values:
             self.mic_var.set(self.mic_dropdown._values[0])
         self.mic_dropdown.grid(row=0, column=1, sticky=tk.EW, pady=5)
+        
+        # Microphone enable/disable button
+        self.mic_toggle_button = ctk.CTkButton(device_grid, text="Disable", width=80, 
+                                             command=self.toggle_mic_input)
+        self.mic_toggle_button.grid(row=0, column=2, padx=5, pady=5)
 
         # System audio selection
         ctk.CTkLabel(device_grid, text="System Audio:").grid(row=1, column=0, padx=(0, 5), pady=5, sticky=tk.W)
@@ -322,9 +338,25 @@ class TranscriberApp:
         if self.system_dropdown._values:
             self.system_var.set(self.system_dropdown._values[0])
         self.system_dropdown.grid(row=1, column=1, sticky=tk.EW, pady=5)
+        
+        # System audio enable/disable button
+        self.system_toggle_button = ctk.CTkButton(device_grid, text="Disable", width=80, 
+                                                command=self.toggle_system_input)
+        self.system_toggle_button.grid(row=1, column=2, padx=5, pady=5)
 
         # Configure grid weights
         device_grid.columnconfigure(1, weight=1)
+        
+        # Audio visualizer section
+        visualizer_frame = ctk.CTkFrame(self.live_tab)
+        visualizer_frame.pack(fill=tk.X, pady=10, padx=10)
+        
+        ctk.CTkLabel(visualizer_frame, text="Audio Visualization",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor=tk.W, pady=(5, 10))
+        
+        # Create the dual audio visualizer
+        self.audio_visualizer = DualAudioVisualizer(visualizer_frame, width=800, height=200)
+        self.audio_visualizer.pack(fill=tk.X, padx=5, pady=5)
 
         # Live transcription section
         live_transcription_frame = ctk.CTkFrame(self.live_tab)
@@ -816,19 +848,51 @@ class TranscriberApp:
         else:
             self.stop_recording()
 
+    def toggle_mic_input(self):
+        """Toggle microphone input on/off."""
+        self.mic_enabled = not self.mic_enabled
+        if self.mic_enabled:
+            self.mic_toggle_button.configure(text="Disable")
+            self.mic_dropdown.configure(state="normal")
+        else:
+            self.mic_toggle_button.configure(text="Enable")
+            self.mic_dropdown.configure(state="disabled")
+    
+    def toggle_system_input(self):
+        """Toggle system audio input on/off."""
+        self.system_enabled = not self.system_enabled
+        if self.system_enabled:
+            self.system_toggle_button.configure(text="Disable")
+            self.system_dropdown.configure(state="normal")
+        else:
+            self.system_toggle_button.configure(text="Enable")
+            self.system_dropdown.configure(state="disabled")
+    
     def start_recording(self):
         """Start recording and transcribing audio."""
         try:
+            # Check if at least one input is enabled
+            if not self.mic_enabled and not self.system_enabled:
+                messagebox.showwarning("Warning", "At least one audio input must be enabled.")
+                return
+                
             # Update UI
             self.live_status_var.set("Initializing...")
-            self.start_button.config(text="Stop Recording", state="disabled")
+            self.start_button.configure(text="Stop Recording", state="disabled")
             self.root.update()
 
             # Set selected devices
-            selected_mic = next((mic for mic in self.live_audio_capture.get_available_mics()
-                                if str(mic) == self.mic_var.get()), None)
-            selected_system = next(
-                (dev for dev in self.live_audio_capture.get_available_system_devices() if str(dev) == self.system_var.get()), None)
+            selected_mic = None
+            selected_system = None
+            
+            if self.mic_enabled:
+                selected_mic = next((mic for mic in self.live_audio_capture.get_available_mics()
+                                    if str(mic) == self.mic_var.get()), None)
+            
+            if self.system_enabled:
+                selected_system = next(
+                    (dev for dev in self.live_audio_capture.get_available_system_devices() 
+                     if str(dev) == self.system_var.get()), None)
 
             self.live_audio_capture.set_mic_device(selected_mic)
             self.live_audio_capture.set_system_device(selected_system)
@@ -837,10 +901,15 @@ class TranscriberApp:
             self.live_audio_capture.start_recording()
             self.is_recording = True
 
-            # Start both transcribers
-            self.mic_transcriber.start_transcription()
-            self.system_transcriber.start_transcription()
+            # Start transcribers based on enabled inputs
+            if self.mic_enabled:
+                self.mic_transcriber.start_transcription()
+            if self.system_enabled:
+                self.system_transcriber.start_transcription()
             self.is_transcribing = True
+            
+            # Start audio visualizer
+            self.audio_visualizer.start()
 
             # Start processing in a separate thread
             self.processing_thread = threading.Thread(target=self._process_audio, daemon=True)
@@ -848,12 +917,16 @@ class TranscriberApp:
 
             # Update UI
             self.live_status_var.set("Recording and transcribing...")
-            self.start_button.config(text="Stop Recording", state="normal")
+            self.start_button.configure(text="Stop Recording", state="normal")
+            
+            # Disable toggle buttons during recording
+            self.mic_toggle_button.configure(state="disabled")
+            self.system_toggle_button.configure(state="disabled")
 
         except Exception as e:
             self.live_status_var.set("Error")
             messagebox.showerror("Error", f"Failed to start recording: {e}")
-            self.start_button.config(text="Start Recording", state="normal")
+            self.start_button.configure(text="Start Recording", state="normal")
             # Clean up resources on error
             self._cleanup_resources()
 
@@ -871,14 +944,21 @@ class TranscriberApp:
                 self.mic_transcriber.stop_transcription()
             if hasattr(self, 'system_transcriber'):
                 self.system_transcriber.stop_transcription()
+                
+            # Stop audio visualizer
+            self.audio_visualizer.stop()
 
             # Update UI
             self.is_recording = False
+            
+            # Re-enable toggle buttons
+            self.mic_toggle_button.configure(state="normal")
+            self.system_toggle_button.configure(state="normal")
             self.live_status_var.set("Ready")
-            self.start_button.config(text="Start Recording", state="normal")
+            self.start_button.configure(text="Start Recording", state="normal")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to stop recording: {e}")
-            self.start_button.config(state="normal")
+            self.start_button.configure(state="normal")
 
     def _cleanup_resources(self):
         """Clean up resources and release memory."""
@@ -905,7 +985,7 @@ class TranscriberApp:
         # self.processing_thread = None
 
     def _process_audio(self):
-        """Process audio from both channels and send to respective transcribers"""
+        """Process audio from both channels and send to respective transcribers and visualizer"""
         # Track recording start time for timestamp calculation
         self.recording_start_time = time.time()
 
@@ -916,6 +996,8 @@ class TranscriberApp:
                 # Calculate current timestamp relative to recording start
                 current_time = time.time() - self.recording_start_time
                 self.mic_transcriber.add_audio_data(mic_frames)
+                # Update mic visualizer
+                self.audio_visualizer.update_mic_data(mic_frames)
 
             # Process system audio
             system_frames = self.live_audio_capture.get_system_audio()
@@ -923,6 +1005,8 @@ class TranscriberApp:
                 # Calculate current timestamp relative to recording start
                 current_time = time.time() - self.recording_start_time
                 self.system_transcriber.add_audio_data(system_frames)
+                # Update system visualizer
+                self.audio_visualizer.update_system_data(system_frames)
 
             time.sleep(0.1)
 
