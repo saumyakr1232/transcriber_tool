@@ -67,6 +67,17 @@ class LiveTranscriber:
         self.audio_queue = queue.Queue()
         self.transcription_queue = queue.Queue()
         self.last_transcription = ""
+        
+        # Silence detection parameters
+        self.silence_threshold = self.config.get("silence_threshold", 0.05)  # Default threshold
+        self.repetitive_patterns = [
+            "a little bit of a little bit",
+            "little bit of a little",
+            "bit of a little bit",
+            "of a little bit of a",
+            "getting repitative words",
+            "getting repetitive words"
+        ]
 
     def start_transcription(self):
         """Start the transcription process."""
@@ -141,6 +152,16 @@ class LiveTranscriber:
                 if audio_chunk.dtype != np.int16:
                     audio_chunk = (audio_chunk * 32767).astype(np.int16)
                 audio_data = audio_chunk.tobytes()
+                
+                # Check for silence/background noise
+                # Calculate RMS (Root Mean Square) as a measure of audio energy
+                rms = np.sqrt(np.mean(np.square(audio_chunk.astype(np.float32))))
+                
+                # Use the configured silence threshold
+                if rms < self.silence_threshold:
+                    # Audio is likely silence or background noise
+                    # Skip transcription to avoid repetitive text
+                    return ""
             else:
                 # Assume it's already bytes
                 audio_data = audio_chunk
@@ -161,8 +182,14 @@ class LiveTranscriber:
             except:
                 pass
 
-            # Update last transcription
+            # Check for repetitive patterns that often occur during silence
+            # Filter out transcriptions with repetitive patterns
             if transcription:
+                is_repetitive = any(pattern in transcription.lower() for pattern in self.repetitive_patterns)
+                if is_repetitive:
+                    return ""
+                    
+                # Update last transcription
                 self.last_transcription = transcription
 
                 # If we have segments with timestamps, use the first one

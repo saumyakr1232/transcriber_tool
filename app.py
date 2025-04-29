@@ -880,6 +880,19 @@ class TranscriberApp:
             self.live_status_var.set("Initializing...")
             self.start_button.configure(text="Stop Recording", state="disabled")
             self.root.update()
+            
+            # Reinitialize transcribers to pick up any config changes (like silence threshold)
+            self.mic_transcriber = LiveTranscriber(
+                config=self.config.config,
+                transcription_callback=self.handle_mic_transcription,
+                transcriber=self.transcriber
+            )
+
+            self.system_transcriber = LiveTranscriber(
+                config=self.config.config,
+                transcription_callback=self.handle_system_transcription,
+                transcriber=self.transcriber
+            )
 
             # Set selected devices
             selected_mic = None
@@ -1122,6 +1135,14 @@ class TranscriberApp:
         engine_combo = ctk.CTkOptionMenu(general_frame, variable=engine_var,
                                          values=TranscriberFactory.get_available_engines())
         engine_combo.grid(row=0, column=1, sticky=tk.W, pady=5, padx=5)
+        
+        # Silence detection settings
+        ctk.CTkLabel(general_frame, text="Silence Threshold:").grid(row=1, column=0, sticky=tk.W, pady=5, padx=5)
+        silence_threshold_var = tk.StringVar(value=str(self.config.get("silence_threshold", 0.01)))
+        silence_threshold_entry = ctk.CTkEntry(general_frame, textvariable=silence_threshold_var, width=100)
+        silence_threshold_entry.grid(row=1, column=1, sticky=tk.W, pady=5, padx=5)
+        ctk.CTkLabel(general_frame, text="(Lower values = more sensitive, 0.005-0.02 recommended)").grid(
+            row=1, column=2, sticky=tk.W, pady=5, padx=5)
 
         # Vosk settings
         vosk_frame = ctk.CTkFrame(vosk_tab)
@@ -1294,7 +1315,8 @@ class TranscriberApp:
             youtube_bg_color.get(),
             model_name.get(),
             base_url.get(),
-            settings_window
+            settings_window,
+            silence_threshold_var.get()
         )).pack(side=tk.RIGHT, padx=5)
 
         ctk.CTkButton(button_frame, text="Cancel", command=settings_window.destroy).pack(side=tk.RIGHT, padx=5)
@@ -1309,7 +1331,7 @@ class TranscriberApp:
                        default_style, default_font, default_fontsize, default_color, default_stroke_color,
                        default_stroke_width, default_bg_color, youtube_font, youtube_fontsize,
                        youtube_color, youtube_stroke_color, youtube_stroke_width, youtube_bg_color,
-                       model_name, base_url, window):
+                       model_name, base_url, window, silence_threshold=None):
         """Save the settings and close the dialog."""
         # Update the configuration
         self.config.set("engine", engine)
@@ -1317,6 +1339,17 @@ class TranscriberApp:
         self.config.set("models.whisper.model_size", whisper_model_size)
         self.config.set("models.whisper.use_gpu", use_gpu)
         self.config.set("models.whisper.language", language)
+        
+        # Update silence threshold if provided
+        if silence_threshold is not None:
+            try:
+                # Convert to float and ensure it's a valid value
+                threshold_value = float(silence_threshold)
+                if threshold_value > 0:
+                    self.config.set("silence_threshold", threshold_value)
+            except ValueError:
+                # If conversion fails, keep the existing value
+                pass
 
         # Update subtitle settings
         self.config.set("subtitles.default_style", default_style)

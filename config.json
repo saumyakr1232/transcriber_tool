@@ -1,42 +1,43 @@
 {
-  "engine": "whisper",
-  "models": {
-    "vosk": {
-      "model_path": "models/vosk-model-small-en-us-0.15"
+    "engine": "whisper",
+    "models": {
+        "vosk": {
+            "model_path": "models/vosk-model-small-en-us-0.15"
+        },
+        "whisper": {
+            "model_size": "base",
+            "use_gpu": true,
+            "language": "English"
+        }
     },
-    "whisper": {
-      "model_size": "base",
-      "use_gpu": true,
-      "language": "English"
-    }
-  },
-  "transcription": {
-    "sample_rate": 16000,
-    "word_timestamps": false
-  },
-  "summarizer": {
-    "model_name": "mistral",
-    "base_url": "http://localhost:11434"
-  },
-  "subtitles": {
-    "default_style": "youtube",
-    "styles": {
-      "default": {
-        "font": "Arial",
-        "fontsize": 40,
-        "color": "white",
-        "stroke_color": "black",
-        "stroke_width": 1.5,
-        "bg_color": "transparent"
-      },
-      "youtube": {
-        "font": "Helvetica-BoldOblique",
-        "fontsize": 45,
-        "color": "white",
-        "stroke_color": "black",
-        "stroke_width": 1.5,
-        "bg_color": "transparent"
-      }
-    }
-  }
+    "transcription": {
+        "sample_rate": 16000,
+        "word_timestamps": false
+    },
+    "summarizer": {
+        "model_name": "mistral",
+        "base_url": "http://localhost:11434"
+    },
+    "subtitles": {
+        "default_style": "youtube",
+        "styles": {
+            "default": {
+                "font": "Arial",
+                "fontsize": 40,
+                "color": "white",
+                "stroke_color": "black",
+                "stroke_width": 1.5,
+                "bg_color": "transparent"
+            },
+            "youtube": {
+                "font": "Helvetica-BoldOblique",
+                "fontsize": 45,
+                "color": "white",
+                "stroke_color": "black",
+                "stroke_width": 1.5,
+                "bg_color": "transparent"
+            }
+        }
+    },
+    "silence_threshold": 0.08
 }
