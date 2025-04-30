@@ -75,6 +75,13 @@ class TranscriberApp:
         # Audio input states
         self.mic_enabled = True
         self.system_enabled = True
+        
+        # Device monitoring
+        self.device_monitor_active = False
+        self.last_known_mics = set(str(mic) for mic in self.live_audio_capture.get_available_mics())
+        self.last_known_system_devices = set(str(dev) for dev in self.live_audio_capture.get_available_system_devices())
+        self.device_change_detected = False
+        self.start_device_monitoring()
 
         # Bind window close event
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -343,6 +350,17 @@ class TranscriberApp:
         self.system_toggle_button = ctk.CTkButton(device_grid, text="Disable", width=80, 
                                                 command=self.toggle_system_input)
         self.system_toggle_button.grid(row=1, column=2, padx=5, pady=5)
+        
+        # Refresh devices button
+        self.refresh_button = ctk.CTkButton(device_grid, text="Refresh Devices", 
+                                          command=self.refresh_audio_devices)
+        self.refresh_button.grid(row=2, column=0, columnspan=3, padx=5, pady=10, sticky=tk.EW)
+        
+        # Device status label
+        self.device_status_var = tk.StringVar(value="Audio devices ready")
+        self.device_status_label = ctk.CTkLabel(device_grid, textvariable=self.device_status_var, 
+                                              text_color="gray50")
+        self.device_status_label.grid(row=3, column=0, columnspan=3, padx=5, pady=(0, 5), sticky=tk.W)
 
         # Configure grid weights
         device_grid.columnconfigure(1, weight=1)
@@ -1410,11 +1428,161 @@ class TranscriberApp:
         # Close button
         ctk.CTkButton(about_frame, text="Close", command=about_window.destroy).pack(pady=10)
 
+    def start_device_monitoring(self):
+        """Start the device monitoring thread to detect device changes."""
+        self.device_monitor_active = True
+        self.device_monitor_thread = threading.Thread(target=self._monitor_devices, daemon=True)
+        self.device_monitor_thread.start()
+    
+    def stop_device_monitoring(self):
+        """Stop the device monitoring thread."""
+        self.device_monitor_active = False
+        if hasattr(self, 'device_monitor_thread') and self.device_monitor_thread.is_alive():
+            self.device_monitor_thread.join(timeout=1.0)
+    
+    def _monitor_devices(self):
+        """Monitor for changes in audio devices."""
+        while self.device_monitor_active:
+            # Get current devices
+            current_mics = set(str(mic) for mic in self.live_audio_capture.get_available_mics())
+            current_system_devices = set(str(dev) for dev in self.live_audio_capture.get_available_system_devices())
+            
+            # Check for changes
+            mics_added = current_mics - self.last_known_mics
+            mics_removed = self.last_known_mics - current_mics
+            system_added = current_system_devices - self.last_known_system_devices
+            system_removed = self.last_known_system_devices - current_system_devices
+            
+            # If changes detected
+            if mics_added or mics_removed or system_added or system_removed:
+                self.device_change_detected = True
+                
+                # Update UI from main thread
+                self.root.after(0, lambda: self._handle_device_changes(
+                    mics_added, mics_removed, system_added, system_removed))
+                
+                # Update last known devices
+                self.last_known_mics = current_mics
+                self.last_known_system_devices = current_system_devices
+            
+            # Check every 2 seconds
+            time.sleep(2)
+    
+    def _handle_device_changes(self, mics_added, mics_removed, system_added, system_removed):
+        """Handle device changes by updating UI and notifying user."""
+        # Update device dropdowns
+        self._update_device_dropdowns()
+        
+        # Create notification message
+        messages = []
+        if mics_added:
+            messages.append(f"New microphone(s) connected: {', '.join(mics_added)}")
+        if mics_removed:
+            messages.append(f"Microphone(s) disconnected: {', '.join(mics_removed)}")
+        if system_added:
+            messages.append(f"New system audio device(s) connected: {', '.join(system_added)}")
+        if system_removed:
+            messages.append(f"System audio device(s) disconnected: {', '.join(system_removed)}")
+        
+        # Show notification if recording
+        if self.is_recording:
+            # Pause recording if the active device was disconnected
+            active_mic = self.mic_var.get()
+            active_system = self.system_var.get()
+            
+            if (self.mic_enabled and active_mic in mics_removed) or \
+               (self.system_enabled and active_system in system_removed):
+                # Stop recording temporarily
+                was_recording = self.is_recording
+                if was_recording:
+                    self.stop_recording()
+                
+                # Show notification with option to select new device
+                message = "\n".join(messages)
+                message += "\n\nThe recording has been paused. Please select a new device and restart recording."
+                messagebox.showwarning("Audio Device Change Detected", message)
+            else:
+                # Just show notification without stopping
+                message = "\n".join(messages)
+                message += "\n\nYou can continue recording with current devices or stop and select new ones."
+                messagebox.showinfo("Audio Device Change Detected", message)
+        else:
+            # Just show notification
+            message = "\n".join(messages)
+            messagebox.showinfo("Audio Device Change Detected", message)
+    
+    def refresh_audio_devices(self):
+        """Manually refresh the audio device lists."""
+        # Update status
+        self.device_status_var.set("Refreshing audio devices...")
+        self.refresh_button.configure(state="disabled")
+        self.root.update()
+        
+        try:
+            # Get current devices
+            current_mics = set(str(mic) for mic in self.live_audio_capture.get_available_mics())
+            current_system_devices = set(str(dev) for dev in self.live_audio_capture.get_available_system_devices())
+            
+            # Check for changes
+            mics_added = current_mics - self.last_known_mics
+            mics_removed = self.last_known_mics - current_mics
+            system_added = current_system_devices - self.last_known_system_devices
+            system_removed = self.last_known_system_devices - current_system_devices
+            
+            # Update dropdowns
+            self._update_device_dropdowns()
+            
+            # Update last known devices
+            self.last_known_mics = current_mics
+            self.last_known_system_devices = current_system_devices
+            
+            # Update status with changes
+            if mics_added or mics_removed or system_added or system_removed:
+                changes = []
+                if mics_added:
+                    changes.append(f"{len(mics_added)} new mic(s)")
+                if mics_removed:
+                    changes.append(f"{len(mics_removed)} mic(s) removed")
+                if system_added:
+                    changes.append(f"{len(system_added)} new system device(s)")
+                if system_removed:
+                    changes.append(f"{len(system_removed)} system device(s) removed")
+                
+                self.device_status_var.set(f"Devices updated: {', '.join(changes)}")
+            else:
+                self.device_status_var.set("No device changes detected")
+        except Exception as e:
+            self.device_status_var.set(f"Error refreshing devices: {e}")
+        finally:
+            # Re-enable refresh button
+            self.refresh_button.configure(state="normal")
+    
+    def _update_device_dropdowns(self):
+        """Update the device dropdown menus with current devices."""
+        # Update microphone dropdown
+        current_mic = self.mic_var.get() if self.mic_var.get() in self.last_known_mics else ""
+        self.mic_dropdown.configure(values=[str(mic) for mic in self.live_audio_capture.get_available_mics()])
+        if self.mic_dropdown._values and not current_mic:
+            self.mic_var.set(self.mic_dropdown._values[0])
+        elif current_mic:
+            self.mic_var.set(current_mic)
+        
+        # Update system audio dropdown
+        current_system = self.system_var.get() if self.system_var.get() in self.last_known_system_devices else ""
+        self.system_dropdown.configure(values=[str(dev) for dev in self.live_audio_capture.get_available_system_devices()])
+        if self.system_dropdown._values and not current_system:
+            self.system_var.set(self.system_dropdown._values[0])
+        elif current_system:
+            self.system_var.set(current_system)
+    
     def on_close(self):
         """Handle window close event."""
         # Stop recording if active
         if self.is_recording:
             self.stop_recording()
+            
+        # Stop device monitoring
+        self.stop_device_monitoring()
 
         # Clean up resources
         self._cleanup_resources()
