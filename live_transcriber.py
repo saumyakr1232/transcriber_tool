@@ -74,9 +74,7 @@ class LiveTranscriber:
             "a little bit of a little bit",
             "little bit of a little",
             "bit of a little bit",
-            "of a little bit of a",
-            "getting repitative words",
-            "getting repetitive words"
+            "of a little bit of a"
         ]
 
     def start_transcription(self):

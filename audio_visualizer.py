@@ -46,6 +46,9 @@ class AudioVisualizer:
         # Create the visualization line
         self.line_id = None
         self._create_line()
+        
+        # Bind to window resize events
+        self.master.bind('<Configure>', self._on_resize)
     
     def _create_line(self):
         """Create the initial visualization line."""
@@ -81,8 +84,8 @@ class AudioVisualizer:
         # Normalize the data to fit in the canvas height
         if len(audio_data) > 0:
             # Apply some scaling to make the visualization more visible
-            # Scale factor can be adjusted based on typical audio levels
-            scale_factor = 0.5 * self.height
+            # Increased scale factor for larger wave amplitude
+            scale_factor = 200  # Increased from 0.5 to 0.8 for larger waves
             audio_data = audio_data * scale_factor
             
             # Clip to ensure it stays within the canvas
@@ -119,6 +122,41 @@ class AudioVisualizer:
             self.is_active = True
             self._update_visualization()
     
+    def _on_resize(self, event):
+        """Handle window resize events to adjust the visualizer.
+        
+        Args:
+            event: The Configure event containing new dimensions
+        """
+        # Only respond to events from the parent widget
+        if event.widget == self.master:
+            # Get the new width
+            new_width = event.width
+            
+            # Update canvas width
+            if new_width != self.width:
+                self.width = new_width
+                self.canvas.config(width=new_width)
+                
+                # Resize the audio data array
+                if len(self.audio_data) > 0:
+                    # Create new array with the new width
+                    new_data = np.zeros(new_width)
+                    
+                    # Resample existing data to the new width
+                    if len(self.audio_data) > 1:
+                        indices = np.linspace(0, len(self.audio_data) - 1, min(new_width, len(self.audio_data)), dtype=int)
+                        new_data[:min(new_width, len(self.audio_data))] = self.audio_data[indices]
+                    
+                    self.audio_data = new_data
+                else:
+                    self.audio_data = np.zeros(new_width)
+                
+                # Recreate the visualization line
+                if self.line_id is not None:
+                    self.canvas.delete(self.line_id)
+                self._create_line()
+    
     def stop(self):
         """Stop the visualization updates."""
         self.is_active = False
@@ -146,9 +184,9 @@ class DualAudioVisualizer(tk.Frame):
         self.system_label = tk.Label(self, text="System Audio")
         self.system_label.pack(anchor=tk.W, padx=5)
         
-        # Create system audio visualizer
+        # Create system audio visualizer with increased height for better visibility
         self.system_visualizer = AudioVisualizer(
-            self, width=width, height=height//4,
+            self, width=width, height=height//3,  # Increased from height//4 to height//3
             bg_color="#000000", line_color="#00FF00"
         )
         self.system_visualizer.canvas.pack(fill=tk.X, padx=5, pady=5)
@@ -157,12 +195,15 @@ class DualAudioVisualizer(tk.Frame):
         self.mic_label = tk.Label(self, text="Microphone Audio")
         self.mic_label.pack(anchor=tk.W, padx=5, pady=(10, 0))
         
-        # Create microphone audio visualizer
+        # Create microphone audio visualizer with increased height
         self.mic_visualizer = AudioVisualizer(
-            self, width=width, height=height//4,
+            self, width=width, height=height//3,  # Increased from height//4 to height//3
             bg_color="#000000", line_color="#00FFFF"
         )
         self.mic_visualizer.canvas.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Bind to parent resize events
+        self.bind('<Configure>', self._on_resize)
     
     def update_system_data(self, audio_data: np.ndarray):
         """Update the system audio visualizer data.
@@ -184,6 +225,22 @@ class DualAudioVisualizer(tk.Frame):
         """Start both visualizers."""
         self.system_visualizer.start()
         self.mic_visualizer.start()
+    
+    def _on_resize(self, event):
+        """Handle resize events for the dual visualizer frame.
+        
+        Args:
+            event: The Configure event containing new dimensions
+        """
+        # Only respond to events from this frame
+        if event.widget == self:
+            # Update internal width
+            new_width = event.width
+            if new_width != self.width:
+                self.width = new_width
+                
+                # No need to manually update the visualizers as they have their own resize handlers
+                # The canvas resize will trigger their own <Configure> events
     
     def stop(self):
         """Stop both visualizers."""
