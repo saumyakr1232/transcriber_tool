@@ -383,9 +383,14 @@ class TranscriberApp:
         ctk.CTkLabel(live_transcription_frame, text="Live Transcription",
                      font=ctk.CTkFont(weight="bold")).pack(anchor=tk.W, pady=(5, 10))
 
-        # Add text widget for live transcription
-        self.live_transcription_text = ctk.CTkTextbox(live_transcription_frame, wrap="word")
-        self.live_transcription_text.pack(fill=tk.BOTH, expand=True)
+        # Add text widget for live transcription with scrolling capability
+        # Create a container frame for the text widget
+        text_container = ctk.CTkFrame(live_transcription_frame)
+        text_container.pack(fill=tk.BOTH, expand=True)
+        
+        # Create the text widget with scrollbar support
+        self.live_transcription_text = ctk.CTkTextbox(text_container, wrap="word")
+        self.live_transcription_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
 
         # Configure text colors (will need to be handled differently in CTkTextbox)
         # We'll use tags in the insert method
@@ -394,6 +399,23 @@ class TranscriberApp:
         self.live_status_var = tk.StringVar(value="Ready")
         live_status_label = ctk.CTkLabel(self.live_tab, textvariable=self.live_status_var)
         live_status_label.pack(anchor=tk.W, pady=5, padx=10)
+
+        # Output file section
+        output_frame = ctk.CTkFrame(self.live_tab)
+        output_frame.pack(fill=tk.X, pady=10, padx=10)
+
+        ctk.CTkLabel(output_frame, text="Output File",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor=tk.W, pady=(5, 10))
+
+        output_input_frame = ctk.CTkFrame(output_frame)
+        output_input_frame.pack(fill=tk.X)
+
+        self.live_output_path = tk.StringVar()
+        self.live_output_path.set("live_transcription.txt")
+        ctk.CTkEntry(output_input_frame, textvariable=self.live_output_path,
+                     width=400).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        ctk.CTkButton(output_input_frame, text="Browse", command=self.browse_live_output,
+                      width=100).pack(side=tk.RIGHT, padx=5)
 
         # Buttons
         live_button_frame = ctk.CTkFrame(self.live_tab)
@@ -405,10 +427,6 @@ class TranscriberApp:
         ctk.CTkButton(live_button_frame, text="Save Transcription",
                       command=self.save_live_transcription).pack(side=tk.LEFT, padx=5)
         ctk.CTkButton(live_button_frame, text="Clear", command=self.clear_live).pack(side=tk.LEFT, padx=5)
-
-        # Output file for live transcription
-        self.live_output_path = tk.StringVar()
-        self.live_output_path.set("live_transcription.txt")
 
         # Start queue processing
         self.process_transcription_queue()
@@ -437,6 +455,16 @@ class TranscriberApp:
         filename = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=".txt")
         if filename:
             self.output_path.set(filename)
+            
+    def browse_live_output(self):
+        """Open a file dialog to select an output file for live transcription."""
+        filetypes = [
+            ("Text Files", "*.txt"),
+            ("All Files", "*.*")
+        ]
+        filename = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=".txt")
+        if filename:
+            self.live_output_path.set(filename)
 
     def start_transcription(self):
         """Start the transcription process in a separate thread."""
@@ -693,15 +721,8 @@ class TranscriberApp:
         # Get the output file path
         output_path = self.live_output_path.get()
         if not output_path:
-            # Open a file dialog
-            filetypes = [
-                ("Text Files", "*.txt"),
-                ("All Files", "*.*")
-            ]
-            output_path = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=".txt")
-            if not output_path:
-                return
-            self.live_output_path.set(output_path)
+            messagebox.showerror("Error", "Please specify an output file path.")
+            return
 
         # Save the transcription
         try:
@@ -1486,7 +1507,7 @@ class TranscriberApp:
         
         # Show notification if recording
         if self.is_recording:
-            # Pause recording if the active device was disconnected
+            # Check if the active device was disconnected
             active_mic = self.mic_var.get()
             active_system = self.system_var.get()
             
@@ -1497,19 +1518,30 @@ class TranscriberApp:
                 if was_recording:
                     self.stop_recording()
                 
-                # Show notification with option to select new device
+                # Automatically switch to the first available device (index 0)
+                if self.mic_enabled and active_mic in mics_removed and self.mic_dropdown._values:
+                    self.mic_var.set(self.mic_dropdown._values[0])
+                
+                if self.system_enabled and active_system in system_removed and self.system_dropdown._values:
+                    self.system_var.set(self.system_dropdown._values[0])
+                
+                # Restart recording with new devices
+                if was_recording:
+                    self.start_recording()
+                    
+                # Show notification about automatic device switch
                 message = "\n".join(messages)
-                message += "\n\nThe recording has been paused. Please select a new device and restart recording."
-                messagebox.showwarning("Audio Device Change Detected", message)
+                message += "\n\nAutomatically switched to default audio devices and resumed recording."
+                messagebox.showinfo("Audio Device Change Detected", message)
             else:
                 # Just show notification without stopping
                 message = "\n".join(messages)
                 message += "\n\nYou can continue recording with current devices or stop and select new ones."
                 messagebox.showinfo("Audio Device Change Detected", message)
         else:
-            # Just show notification
-            message = "\n".join(messages)
-            messagebox.showinfo("Audio Device Change Detected", message)
+            # Ask user if they want to use newly connected devices
+            if mics_added or system_added:
+                self._prompt_for_new_devices(mics_added, system_added)
     
     def refresh_audio_devices(self):
         """Manually refresh the audio device lists."""
@@ -1574,6 +1606,55 @@ class TranscriberApp:
             self.system_var.set(self.system_dropdown._values[0])
         elif current_system:
             self.system_var.set(current_system)
+            
+    def _prompt_for_new_devices(self, mics_added, system_added):
+        """Show a dialog asking if the user wants to use newly connected devices.
+        
+        Args:
+            mics_added: Set of newly added microphones
+            system_added: Set of newly added system audio devices
+        """
+        # Create message about new devices
+        message = "New audio devices detected:\n\n"
+        
+        new_mic = None
+        new_system = None
+        
+        if mics_added:
+            message += f"New microphone(s): {', '.join(mics_added)}\n"
+            new_mic = list(mics_added)[0]  # Get the first new microphone
+            
+        if system_added:
+            message += f"New system audio device(s): {', '.join(system_added)}\n"
+            new_system = list(system_added)[0]  # Get the first new system device
+            
+        message += "\nWould you like to use the newly connected device(s)?"
+        
+        # Show confirmation dialog
+        if messagebox.askyesno("New Audio Device Detected", message):
+            # User confirmed, switch to new devices
+            was_recording = False
+            
+            # Stop recording if active
+            if self.is_recording:
+                was_recording = True
+                self.stop_recording()
+            
+            # Switch to new devices
+            if new_mic and self.mic_enabled:
+                self.mic_var.set(new_mic)
+                self.device_status_var.set(f"Switched to new microphone: {new_mic}")
+                
+            if new_system and self.system_enabled:
+                self.system_var.set(new_system)
+                if new_mic:
+                    self.device_status_var.set(f"Switched to new devices")
+                else:
+                    self.device_status_var.set(f"Switched to new system audio: {new_system}")
+            
+            # Restart recording if it was active
+            if was_recording:
+                self.root.after(500, self.toggle_recording)  # Small delay before restarting
     
     def on_close(self):
         """Handle window close event."""
